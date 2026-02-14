@@ -35,10 +35,11 @@ jobs:
       - name: Check for pending changesets
         id: check
         run: |
-          if npx changeset status --since=main 2>&1 | grep -q "No changesets"; then
-            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
-          else
+          # changeset status exits with error code 1 when no changesets found
+          if npx changeset status --since=main > /dev/null 2>&1; then
             echo "has_changesets=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create Release Pull Request or Publish to npm
