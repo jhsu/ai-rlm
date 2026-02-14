@@ -75,14 +75,16 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
         .union([
           z.string().describe("Text document or content to analyze"),
           z.array(z.string()).describe("Array of text lines or documents"),
-          z.record(z.unknown()).describe("JSON object or structured data"),
+          z
+            .record(z.string(), z.unknown())
+            .describe("JSON object or structured data"),
         ])
         .describe("The large context, document, or dataset to analyze"),
 
       query: z
         .string()
         .describe(
-          "The specific question, task, or instruction to perform on the context. Be clear and specific.",
+          "The specific question, task, or instruction to perform on the context. Be clear and specific."
         ),
 
       maxIterations: z
@@ -102,7 +104,7 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
 
     execute: async (
       { context, query, maxIterations, maxLLMCalls },
-      { abortSignal },
+      { abortSignal }
     ) => {
       // Create RLMAgent with merged config
       const agent = new RLMAgent({
