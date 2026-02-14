@@ -11,9 +11,6 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    permission:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
