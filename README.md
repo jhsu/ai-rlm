@@ -20,8 +20,10 @@ RLM is an inference strategy where LLMs treat long contexts as part of an extern
 ## Installation
 
 ```bash
-npm install ai-rlm
+npm install ai-rlm @ai-sdk/openai
 ```
+
+The `model` and `subModel` settings accept any AI SDK `LanguageModel` — use any provider ([OpenAI](https://sdk.vercel.ai/providers/ai-sdk-providers/openai), [Anthropic](https://sdk.vercel.ai/providers/ai-sdk-providers/anthropic), [Google](https://sdk.vercel.ai/providers/ai-sdk-providers/google-generative-ai), etc.).
 
 ## Usage
 
@@ -31,13 +33,14 @@ The **RLMAgent** class provides a clean, agent-based API that integrates seamles
 
 ```typescript
 import { RLMAgent } from 'ai-rlm';
+import { openai } from '@ai-sdk/openai';
 
 // Create agent
 const agent = new RLMAgent({
-  model: 'gpt-4.1',              // Root agent model
-  subModel: 'gpt-4.1-mini',      // Sub-LLM model for queries
-  maxIterations: 20,             // Max REPL iterations
-  maxLLMCalls: 50,               // Max sub-LLM calls
+  model: openai('gpt-4.1'),              // Root agent model
+  subModel: openai('gpt-4.1-mini'),      // Sub-LLM model for queries
+  maxIterations: 20,                      // Max REPL iterations
+  maxLLMCalls: 50,                        // Max sub-LLM calls
 });
 
 // Process a context
@@ -66,16 +69,17 @@ Use **createRLMTool** to create an AI SDK-compatible tool for use with `generate
 ```typescript
 import { createRLMTool } from 'ai-rlm';
 import { generateText } from 'ai';
+import { openai } from '@ai-sdk/openai';
 
 // Create the tool
 const rlmTool = createRLMTool({
-  model: 'gpt-4.1',
-  subModel: 'gpt-4.1-mini',
+  model: openai('gpt-4.1'),
+  subModel: openai('gpt-4.1-mini'),
 });
 
 // Use in generateText
 const result = await generateText({
-  model: 'gpt-4.1',
+  model: openai('gpt-4.1'),
   tools: { analyzeLargeContext: rlmTool },
   prompt: 'Analyze this large codebase for security vulnerabilities',
 });
@@ -86,11 +90,15 @@ const result = await generateText({
 ```typescript
 import { ToolLoopAgent } from 'ai';
 import { createRLMTool } from 'ai-rlm';
+import { openai } from '@ai-sdk/openai';
 
 const agent = new ToolLoopAgent({
-  model: 'gpt-4.1',
+  model: openai('gpt-4.1'),
   tools: {
-    analyzeLargeContext: createRLMTool(),
+    analyzeLargeContext: createRLMTool({
+      model: openai('gpt-4.1'),
+      subModel: openai('gpt-4.1-mini'),
+    }),
     // ... other tools
   },
 });
@@ -184,9 +192,11 @@ The primary class for using RLM as an agent.
 #### `constructor(settings: RLMAgentSettings)`
 
 ```typescript
+import type { LanguageModel } from 'ai';
+
 interface RLMAgentSettings {
-  model: string;            // Required: Root agent model
-  subModel?: string;        // Optional: Sub-LLM model (defaults to model)
+  model: LanguageModel;     // Required: Root agent model
+  subModel?: LanguageModel; // Optional: Sub-LLM model (defaults to model)
   maxIterations?: number;   // Max REPL iterations (default: 20)
   maxLLMCalls?: number;     // Max sub-LLM calls (default: 50)
   maxOutputChars?: number;  // Max REPL output chars (default: 100000)
@@ -244,9 +254,11 @@ Factory function to create RLM as an AI SDK-compatible tool.
 #### `createRLMTool(config?: RLMToolConfig)`
 
 ```typescript
+import type { LanguageModel } from 'ai';
+
 function createRLMTool(config?: {
-  model?: string;           // Root agent model
-  subModel?: string;        // Sub-LLM model
+  model?: LanguageModel;    // Root agent model
+  subModel?: LanguageModel; // Sub-LLM model
   maxIterations?: number;   // Max iterations (default: 20)
   maxLLMCalls?: number;     // Max LLM calls (default: 50)
   maxOutputChars?: number;  // Max output chars (default: 100000)
