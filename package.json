@@ -56,20 +56,19 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {
-    "ai": "^6.0.86",
-    "zod": "^3.23.0"
-  },
-  "optionalDependencies": {
-    "@ai-sdk/openai": "^3.0.29"
-  },
+  "dependencies": {},
+  "optionalDependencies": {},
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "zod": "^3.23.0 || ^4.1.8"
   },
   "devDependencies": {
+    "ai": "^6.0.86",
     "@changesets/cli": "^2.29.8",
+    "@ai-sdk/openai": "^3.0.29",
     "@types/bun": "latest",
     "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "zod": "^4.1.8"
   }
 }
