@@ -1,0 +1,38 @@
+# Source files (we publish compiled dist/)
+src/
+tsconfig.json
+
+# Development files
+.git/
+.gitignore
+.env
+.env.local
+.env.*.local
+
+# Testing
+*.test.ts
+*.spec.ts
+coverage/
+.vscode/
+.idea/
+
+# Build artifacts (except dist/)
+*.log
+*.tsbuildinfo
+
+# Documentation (published separately)
+CLAUDE.md
+rlm.pdf
+
+# Examples (optional - remove if you want to include them)
+examples/
+
+# Node modules (never publish)
+node_modules/
+bun.lock
+package-lock.json
+yarn.lock
+
+# OS files
+.DS_Store
+Thumbs.db

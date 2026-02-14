@@ -1,0 +1,78 @@
+{
+  "name": "ai-rlm",
+  "version": "1.0.0",
+  "description": "Recursive Language Model (RLM) implementation using the Vercel AI SDK. Process long contexts through iterative code execution and sub-LLM queries.",
+  "author": "Joe Hsu <jhsu.x1@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourusername/ai-rlm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/ai-rlm/issues"
+  },
+  "homepage": "https://github.com/yourusername/ai-rlm#readme",
+  "keywords": [
+    "ai",
+    "rlm",
+    "recursive",
+    "language-model",
+    "llm",
+    "ai-sdk",
+    "context",
+    "large-context",
+    "agent",
+    "tool"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./rlm": {
+      "types": "./dist/rlm.d.ts",
+      "import": "./dist/rlm.js",
+      "require": "./dist/rlm.cjs"
+    },
+    "./rlm-tool": {
+      "types": "./dist/rlm-tool.d.ts",
+      "import": "./dist/rlm-tool.js",
+      "require": "./dist/rlm-tool.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:watch": "tsc -p tsconfig.build.json --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "ai": "^6.0.86",
+    "zod": "^3.23.0"
+  },
+  "optionalDependencies": {
+    "@ai-sdk/openai": "^3.0.29",
+    "vm2": "^3.10.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
