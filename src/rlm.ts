@@ -4,26 +4,12 @@
  * Based on the paper "Recursive Language Models" (Zhang, Kraska, Khattab, 2025)
  * Uses the Vercel AI SDK for the implementation.
  *
- * REPL Environment: JavaScript with vm2 or node:vm sandbox
+ * REPL Environment: JavaScript with node:vm sandbox
  */
 
 import { generateText } from "ai";
 import type { ModelMessage, LanguageModel } from "ai";
 import * as vm from "node:vm";
-
-// // Try to import vm2, but don't fail if it's not available (e.g., in Bun)
-// let VM: typeof import("vm2").VM | undefined;
-// try {
-//   const vm2 = await import("vm2");
-//   VM = vm2.VM;
-// } catch {
-//   // vm2 not available, will use node:vm fallback
-// VM = undefined;
-// }
-
-// ============================================================================
-// Types and Interfaces
-// ============================================================================
 
 /**
  * Settings for RLMAgent
@@ -106,10 +92,6 @@ export interface RLMResult {
  */
 export type RLMContext = string | string[] | Record<string, unknown>;
 
-// ============================================================================
-// REPL Environment - Supports both vm2 and node:vm
-// ============================================================================
-
 interface Sandbox {
   console: {
     log: (...args: unknown[]) => void;
@@ -124,24 +106,21 @@ interface Sandbox {
 
 /**
  * Sandbox environment for executing JavaScript code safely
- * Uses vm2 when available (Node.js), falls back to node:vm (Bun/Node)
+ * Uses node:vm (Bun/Node)
  */
 class REPLEnvironment {
-  // private vm2Instance: import("vm2").VM | undefined;
   private vmContext: vm.Context | undefined;
   private llmCallCount: number;
   private maxLLMCalls: number;
   private subModel: LanguageModel;
   private contextLoaded: boolean = false;
   private consoleOutput: string[] = [];
-  // private useVM2: boolean;
   private timeout: number;
 
   constructor(subModel: LanguageModel, maxLLMCalls: number, timeout = 30000) {
     this.llmCallCount = 0;
     this.maxLLMCalls = maxLLMCalls;
     this.subModel = subModel;
-    // this.useVM2 = VM !== undefined;
     this.timeout = timeout;
   }
 
@@ -192,17 +171,7 @@ class REPLEnvironment {
       },
     };
 
-    // if (this.useVM2 && VM) {
-    //   // Use vm2 (better security, built-in timeout)
-    //   this.vm2Instance = new VM({
-    //     timeout: this.timeout,
-    //     sandbox,
-    //   });
-    // } else {
-    // Fallback to node:vm
     this.vmContext = vm.createContext(sandbox);
-    // }
-
     this.contextLoaded = true;
   }
 
@@ -240,19 +209,10 @@ class REPLEnvironment {
     try {
       let result: unknown;
 
-      // if (this.useVM2 && this.vm2Instance) {
-      //   // Use vm2 (has built-in timeout)
-      //   result = this.vm2Instance.run(code);
-      // } else if (this.vmContext) {
-      // Use node:vm with timeout
-      // timeout is specified in runInContext options, not Script constructor
       const script = new vm.Script(code);
       if (this.vmContext) {
         result = script.runInContext(this.vmContext, { timeout: this.timeout });
       }
-      // } else {
-      //   throw new Error("REPL environment not initialized");
-      // }
 
       const stdout = this.consoleOutput.join("\n");
 
@@ -283,9 +243,6 @@ class REPLEnvironment {
   getVariable(name: string): unknown {
     try {
       if (this.vmContext) {
-        // if ...
-        //   return this.vm2Instance.run(name);
-        // } else if (this.vmContext) {
         const script = new vm.Script(name);
         return script.runInContext(this.vmContext, { timeout: 1000 });
       }
@@ -307,15 +264,9 @@ class REPLEnvironment {
    */
   cleanup(): void {
     this.consoleOutput = [];
-    // vm2 and node:vm handle cleanup automatically via garbage collection
-    // this.vm2Instance = undefined;
     this.vmContext = undefined;
   }
 }
-
-// ============================================================================
-// Utility Functions
-// ============================================================================
 
 function extractCodeBlocks(text: string): string[] {
   const codeBlockRegex = /```(?:javascript|js)?\s*\n([\s\S]*?)\n```/g;
@@ -387,10 +338,6 @@ When done, provide your final answer using:
 - FINAL_VAR(variable_name) - to submit a variable from the REPL
 
 Think step-by-step and show your reasoning before each code block.`;
-
-// ============================================================================
-// RLMAgent Class (New API)
-// ============================================================================
 
 export class RLMAgent {
   private settings: Required<RLMAgentSettings>;
@@ -656,67 +603,5 @@ export class RLMAgent {
     };
   }
 }
-
-// ============================================================================
-// RLM Class (Deprecated - kept for backward compatibility)
-// ============================================================================
-
-/**
- * @deprecated Use RLMAgent instead. This class is kept for backward compatibility.
- * Example:
- *   Before: const rlm = new RLM({...}); const result = await rlm.completion(context, query);
- *   After:  const agent = new RLMAgent({...}); const result = await agent.generate({context, query});
- */
-export class RLM {
-  private agent: RLMAgent;
-
-  constructor(
-    config: {
-      model?: LanguageModel;
-      subModel?: LanguageModel;
-      maxIterations?: number;
-      maxLLMCalls?: number;
-      maxOutputChars?: number;
-      verbose?: boolean;
-    } = {},
-  ) {
-    console.warn("Warning: RLM class is deprecated. Use RLMAgent instead.");
-    this.agent = new RLMAgent({
-      model: config.model!,
-      subModel: config.subModel,
-      maxIterations: config.maxIterations,
-      maxLLMCalls: config.maxLLMCalls,
-      maxOutputChars: config.maxOutputChars,
-      verbose: config.verbose,
-    });
-  }
-
-  /**
-   * @deprecated Use RLMAgent.generate() instead
-   */
-  async completion(context: RLMContext, query: string): Promise<RLMResult> {
-    console.warn(
-      "Warning: completion() is deprecated. Use generate() instead.",
-    );
-    const result = await this.agent.generate({ context, query });
-
-    // Convert to old format
-    return {
-      answer: result.text,
-      trajectory: result.steps.map((step: REPLStep, idx: number) => ({
-        iteration: step.iteration || idx + 1,
-        reasoning: step.reasoning || "",
-        code: step.code || "",
-        output: step.output || "",
-      })),
-      llmCallCount: result.llmCallCount,
-      iterations: result.iterations,
-    };
-  }
-}
-
-// ============================================================================
-// Export
-// ============================================================================
 
 export default RLMAgent;

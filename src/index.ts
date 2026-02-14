@@ -6,7 +6,7 @@
  */
 
 // Main exports
-export { RLMAgent, RLM } from './rlm.js';
+export { RLMAgent } from "./rlm.js";
 export type {
   RLMAgentSettings,
   RLMAgentCallParameters,
@@ -15,13 +15,11 @@ export type {
   RLMStreamResult,
   RLMResult,
   RLMContext,
-} from './rlm.js';
+} from "./rlm.js";
 
 // Tool exports
-export { createRLMTool } from './rlm-tool.js';
-export type {
-  RLMToolConfig,
-} from './rlm-tool.js';
+export { createRLMTool } from "./rlm-tool.js";
+export type { RLMToolConfig } from "./rlm-tool.js";
 
 // Default export
-export { RLMAgent as default } from './rlm.js';
+export { RLMAgent as default } from "./rlm.js";

@@ -197,8 +197,4 @@ export function createRLMToolForDocumentSearch(config: RLMToolConfig) {
   });
 }
 
-// ============================================================================
-// Export
-// ============================================================================
-
 export default createRLMTool;
