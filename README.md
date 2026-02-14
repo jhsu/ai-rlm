@@ -1,6 +1,6 @@
 # RLM (Recursive Language Model) - TypeScript Implementation
 
-A TypeScript implementation of the RLM (Recursive Language Model) inference strategy using the Vercel AI SDK and JavaScript with vm2 sandbox.
+A TypeScript implementation of the RLM (Recursive Language Model) inference strategy using the Vercel AI SDK.
 
 Based on the paper "Recursive Language Models" by Zhang, Kraska, and Khattab (2025).
 
@@ -13,14 +13,14 @@ RLM is an inference strategy where LLMs treat long contexts as part of an extern
 - **Iterative Code Execution**: The model writes JavaScript code, sees output, then writes more code
 - **Sub-LLM Queries**: Access to `llm_query()` and `llm_query_batched()` for semantic analysis
 - **Context Management**: Efficient handling of large contexts through chunking
-- **Sandboxed REPL**: Secure JavaScript execution using vm2
+- **Sandboxed REPL**: JavaScript execution in a sandboxed `node:vm` context
 - **AI SDK Integration**: Works as an Agent or Tool with the Vercel AI SDK
 - **Multiple Usage Patterns**: Use as standalone agent or as a tool in larger workflows
 
 ## Installation
 
 ```bash
-bun install
+npm install ai-rlm
 ```
 
 ## Usage
@@ -30,7 +30,7 @@ bun install
 The **RLMAgent** class provides a clean, agent-based API that integrates seamlessly with the AI SDK:
 
 ```typescript
-import { RLMAgent } from './src/rlm.js';
+import { RLMAgent } from 'ai-rlm';
 
 // Create agent
 const agent = new RLMAgent({
@@ -64,7 +64,7 @@ console.log('Steps:', result.steps); // Full trajectory
 Use **createRLMTool** to create an AI SDK-compatible tool for use with `generateText` or `ToolLoopAgent`:
 
 ```typescript
-import { createRLMTool } from './src/rlm-tool.js';
+import { createRLMTool } from 'ai-rlm';
 import { generateText } from 'ai';
 
 // Create the tool
@@ -85,7 +85,7 @@ const result = await generateText({
 
 ```typescript
 import { ToolLoopAgent } from 'ai';
-import { createRLMTool } from './src/rlm-tool.js';
+import { createRLMTool } from 'ai-rlm';
 
 const agent = new ToolLoopAgent({
   model: 'gpt-4.1',
@@ -117,9 +117,9 @@ while (true) {
 }
 ```
 
-## JavaScript Code Example
+## How It Works
 
-The RLM agent writes JavaScript code to explore the context:
+The RLM agent writes JavaScript code to explore the context in an iterative loop:
 
 ```javascript
 // First, explore the context
@@ -137,6 +137,43 @@ const answer = targetLine?.match(/magic number is (\d+)/)?.[1];
 // Submit answer
 FINAL_VAR(answer)
 ```
+
+1. **Context Loading**: The context is loaded into a sandboxed JavaScript REPL environment
+2. **Iterative Reasoning**: The root LLM writes JavaScript code to explore the context
+3. **Code Execution**: Code is executed in a `node:vm` sandbox with a 30s timeout
+4. **Sub-LLM Queries**: For semantic analysis, `llm_query()` delegates to a sub-model
+5. **Result Accumulation**: The model iterates until it finds an answer
+6. **Final Answer**: The model submits an answer using `FINAL(answer)` or `FINAL_VAR(variable_name)`
+
+### System Prompt
+
+The RLM system prompt instructs the model to:
+- EXPLORE FIRST - Look at data before processing
+- ITERATE - Write small code snippets, observe outputs
+- VERIFY BEFORE SUBMITTING - Check results are correct
+- USE llm_query FOR SEMANTICS - Code finds WHERE; LLM understands WHAT
+- CHUNK SMARTLY - Feed substantial chunks to sub-LLMs (~500K chars)
+
+## REPL Sandbox
+
+The JavaScript REPL runs code in a `node:vm` sandboxed context:
+
+### Available in the Sandbox:
+
+- **`context`**: The input context (string or object)
+- **`console.log()` / `console.error()`**: Output logging
+- **`llm_query(prompt)`**: Query a sub-LLM for semantic analysis
+- **`llm_query_batched(prompts)`**: Query multiple sub-LLMs
+- **`FINAL(answer)`**: Submit final answer directly
+- **`FINAL_VAR(varName)`**: Submit a variable from the REPL
+- **Standard JavaScript**: All ES6+ features, Array methods, String methods, Math, JSON, etc.
+
+### Security Features:
+
+- 30-second timeout on code execution
+- No access to Node.js built-in modules or file system
+- No network access
+- Sandboxed console output capture
 
 ## API Reference
 
@@ -229,9 +266,9 @@ function createRLMTool(config?: {
 **Tool Output:**
 ```typescript
 {
-  answer: string;          // The generated answer
+  answer: string;           // The generated answer
   iterations: number;       // Number of iterations
-  stepsTaken: number;     // Number of steps executed
+  stepsTaken: number;       // Number of steps executed
 }
 ```
 
@@ -246,82 +283,42 @@ type RLMContext = string | string[] | Record<string, unknown>;
 - `string[]`: Array of lines or documents
 - `Record<string, unknown>`: JSON/structured data
 
-## How It Works
-
-1. **Context Loading**: The context is loaded into a vm2 sandboxed REPL environment
-2. **Iterative Reasoning**: The root LLM writes JavaScript code to explore the context
-3. **Code Execution**: Code is executed in a secure vm2 VM with 30s timeout
-4. **Sub-LLM Queries**: For semantic analysis, `llm_query()` returns markers that are processed
-5. **Result Accumulation**: The model iterates until it finds an answer
-6. **Final Answer**: The model submits an answer using `FINAL(answer)` or `FINAL_VAR(variable_name)`
-
-### System Prompt
-
-The RLM system prompt instructs the model to:
-- EXPLORE FIRST - Look at data before processing
-- ITERATE - Write small code snippets, observe outputs
-- VERIFY BEFORE SUBMITTING - Check results are correct
-- USE llm_query FOR SEMANTICS - Code finds WHERE; LLM understands WHAT
-- CHUNK SMARTLY - Feed substantial chunks to sub-LLMs (~500K chars)
-
-## REPL Environment (vm2)
-
-The JavaScript REPL uses the [vm2](https://github.com/patriksimek/vm2) package for secure sandboxing:
-
-### Available in the Sandbox:
-
-- **`context`**: The input context (string or object)
-- **`console.log()` / console.error()**: Output logging
-- **`llm_query(prompt)`**: Query sub-LLM (returns marker for processing)
-- **`llm_query_batched(prompts)`**: Query multiple sub-LLMs
-- **`FINAL(answer)`**: Submit final answer directly
-- **`FINAL_VAR(varName)`**: Submit a variable from the REPL
-- **Standard JavaScript**: All ES6+ features, Array methods, String methods, Math, JSON, etc.
-
-### Security Features:
-
-- 30-second timeout on code execution
-- No access to Node.js modules or file system
-- No network access
-- Sandboxed console.log for capturing output
-
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      RLMAgent Class                          │
+│                      RLMAgent Class                         │
 ├─────────────────────────────────────────────────────────────┤
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │              REPL Environment (vm2)                    │ │
-│  │  - Sandboxed JavaScript execution                      │ │
-│  │  - llm_query() returns markers                         │ │
-│  │  - llm_query_batched() for parallel                    │ │
-│  │  - 30s timeout protection                              │ │
-│  └───────────────────────────────────────────────────────┘ │ │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │              REPL Environment (node:vm)               │  │
+│  │  - Sandboxed JavaScript execution                     │  │
+│  │  - llm_query() for sub-LLM semantic analysis          │  │
+│  │  - 30s timeout protection                             │  │
+│  └───────────────────────────────────────────────────────┘  │
 │                                                             │
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │              generate() Method                         │ │
-│  │  1. Generate reasoning + JS code                       │ │
-│  │  2. Execute in vm2 sandbox                             │ │
-│  │  3. Process llm_query markers → real calls             │ │
-│  │  4. Check for FINAL() answer                           │ │
-│  │  5. Repeat or return answer                            │ │
-│  └───────────────────────────────────────────────────────┘ │ │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │              generate() Method                        │  │
+│  │  1. Generate reasoning + JS code                      │  │
+│  │  2. Execute in sandboxed context                      │  │
+│  │  3. Process llm_query markers → real LLM calls        │  │
+│  │  4. Check for FINAL() answer                          │  │
+│  │  5. Repeat or return answer                           │  │
+│  └───────────────────────────────────────────────────────┘  │
 │                                                             │
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │              stream() Method                           │ │
-│  │  - Same as generate() with streaming                 │ │
-│  │  - Returns ReadableStream for real-time output         │ │
-│  └───────────────────────────────────────────────────────┘ │ │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │              stream() Method                          │  │
+│  │  - Same as generate() with streaming                  │  │
+│  │  - Returns ReadableStream for real-time output        │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │
                               │ createRLMTool()
                               ▼
                     ┌──────────────────────┐
-                    │    AI SDK Tool       │
-                    │ - Tool interface     │
-                    │ - Input validation   │
-                    │ - Auto-execution     │
+                    │    AI SDK Tool        │
+                    │ - Tool interface      │
+                    │ - Input validation    │
+                    │ - Auto-execution      │
                     └──────────────────────┘
 ```
 
@@ -347,42 +344,6 @@ bun run -e "import { example1SimpleTextSearch } from './examples/basic-usage.ts'
 - **`examples/document-comparison.ts`**: Document diffing example
 - **`examples/data-transformation.ts`**: Data extraction and transformation
 
-## Migration from RLM to RLMAgent
-
-If you were using the old `RLM` class:
-
-```typescript
-// BEFORE (deprecated):
-import { RLM } from './src/rlm.js';
-const rlm = new RLM({ model: 'gpt-4.1' });
-const result = await rlm.completion(context, query);
-console.log(result.answer);
-
-// AFTER (new API):
-import { RLMAgent } from './src/rlm.js';
-const agent = new RLMAgent({ model: 'gpt-4.1' });
-const result = await agent.generate({ context, query });
-console.log(result.text);
-```
-
-**Key Changes:**
-- Class name: `RLM` → `RLMAgent`
-- Method name: `completion()` → `generate()`
-- Parameters: Now accepts object with `context` and `query`
-- Result property: `result.answer` → `result.text`
-- Old API still works but shows deprecation warnings
-
-## Comparison with Python Reference
-
-| Feature | Python (Reference) | JavaScript (This) |
-|---------|-------------------|-------------------|
-| Framework | DSPy | Vercel AI SDK |
-| Execution | PythonInterpreter (Deno/WASM) | vm2 sandbox |
-| Syntax | Python | JavaScript/TypeScript |
-| Type Safety | Runtime | Full TypeScript |
-| LLM Calls | Direct LM calls | AI SDK generateText |
-| Usage Pattern | Module class | Agent + Tool |
-
 ## License
 
 MIT
@@ -390,6 +351,4 @@ MIT
 ## References
 
 - Paper: "Recursive Language Models" (Zhang, Kraska, Khattab, 2025)
-- Reference Implementation: `/home/jhsu/src/rlm-minimal`
 - AI SDK Documentation: https://sdk.vercel.ai/docs
-- vm2 Documentation: https://github.com/patriksimek/vm2

@@ -492,7 +492,7 @@ function generateRandomSentence(): string {
 export async function runAllExamples() {
   console.log("\n" + "=".repeat(60));
   console.log("RLM (Recursive Language Model) - Example Suite");
-  console.log("JavaScript + vm2 Sandbox Implementation");
+  console.log("JavaScript + vm Sandbox Implementation");
   console.log("=".repeat(60));
 
   const results = {
