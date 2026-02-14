@@ -9,16 +9,15 @@ permissions:
   id-token: write
   contents: read
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+concurrency:
+  group: "release"
+  cancel-in-progress: false
 
 jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
+    if: github.repository_owner == 'jhsu'
     steps:
       - uses: actions/checkout@v4
         with:
