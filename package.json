@@ -6,12 +6,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourusername/ai-rlm.git"
+    "url": "git+https://github.com/jhsu/ai-rlm.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/ai-rlm/issues"
+    "url": "https://github.com/jhsu/ai-rlm/issues"
   },
-  "homepage": "https://github.com/yourusername/ai-rlm#readme",
+  "homepage": "https://github.com/jhsu/ai-rlm#readme",
   "keywords": [
     "ai",
     "rlm",
@@ -30,18 +30,15 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": "./dist/index.js"
     },
     "./rlm": {
       "types": "./dist/rlm.d.ts",
-      "import": "./dist/rlm.js",
-      "require": "./dist/rlm.cjs"
+      "import": "./dist/rlm.js"
     },
     "./rlm-tool": {
       "types": "./dist/rlm-tool.d.ts",
-      "import": "./dist/rlm-tool.js",
-      "require": "./dist/rlm-tool.cjs"
+      "import": "./dist/rlm-tool.js"
     }
   },
   "files": [
@@ -64,8 +61,7 @@
     "zod": "^3.23.0"
   },
   "optionalDependencies": {
-    "@ai-sdk/openai": "^3.0.29",
-    "vm2": "^3.10.4"
+    "@ai-sdk/openai": "^3.0.29"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
