@@ -251,12 +251,16 @@ class REPLEnvironment {
 
     this.llmCallCount++;
 
-    const result = await generateText({
-      model: this.subModel,
-      prompt: prompt,
-    });
-
-    return result.text;
+    try {
+      const result = await generateText({
+        model: this.subModel,
+        prompt: prompt,
+      });
+      return result.text;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`llm_query failed: ${msg}`);
+    }
   }
 
   /**
@@ -269,27 +273,32 @@ class REPLEnvironment {
       );
     }
 
-    // Create a sub-RLM agent with decreased depth
-    const subAgent = new RLMAgent({
-      model: this.model,
-      subModel: this.subModel,
-      maxIterations: Math.max(5, Math.floor(this.maxIterations / 2)),
-      maxLLMCalls: Math.max(10, Math.floor(this.maxLLMCalls / 2)),
-      maxOutputChars: this.maxOutputChars,
-      maxDepth: this.maxDepth - 1,
-      verbose: this.verbose,
-    });
+    try {
+      // Create a sub-RLM agent with decreased depth
+      const subAgent = new RLMAgent({
+        model: this.model,
+        subModel: this.subModel,
+        maxIterations: Math.max(5, Math.floor(this.maxIterations / 2)),
+        maxLLMCalls: Math.max(10, Math.floor(this.maxLLMCalls / 2)),
+        maxOutputChars: this.maxOutputChars,
+        maxDepth: this.maxDepth - 1,
+        verbose: this.verbose,
+      });
 
-    // The sub-agent inherits our call count budget
-    const result = await subAgent._generate({
-      context: subContext || "No context provided",
-      query: prompt,
-    });
+      // The sub-agent inherits our call count budget
+      const result = await subAgent._generate({
+        context: subContext || "No context provided",
+        query: prompt,
+      });
 
-    // Track calls used by sub-agent
-    this.llmCallCount += result.llmCallCount;
+      // Track calls used by sub-agent
+      this.llmCallCount += result.llmCallCount;
 
-    return result.text;
+      return result.text;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`sub_rlm failed: ${msg}`);
+    }
   }
 
   /**
@@ -349,10 +358,13 @@ class REPLEnvironment {
           error: error.message,
         };
       }
+      // Capture non-Error exceptions with more detail
+      const errorStr = String(error);
+      const errorType = typeof error;
       return {
         stdout: this.consoleOutput.join("\n"),
-        stderr: "Unknown error",
-        error: "Unknown error",
+        stderr: `Execution error (${errorType}): ${errorStr}`,
+        error: `Execution error (${errorType}): ${errorStr}`,
       };
     }
   }
@@ -468,16 +480,71 @@ EFFICIENCY RULES:
 2. INCREMENTAL CHANGES ONLY - Reuse existing variables and functions; avoid re-running full scripts each step.
 3. LOG BRIEFLY - Never print full context or large objects. Prefer concise summaries (counts, keys, first 3 items, short previews).
 4. DEBUG MINIMALLY - If an error occurs, inspect the specific failing line/variable and patch the smallest possible part.
-5. FINALIZE EARLY - As soon as you have the answer in a variable, return it with FINAL_VAR(variable_name) immediately.
+5. FINALIZE EARLY - Once you have successfully extracted the answer into a variable and confirmed it looks correct (one quick console.log), immediately return it with FINAL_VAR(variable_name). Do NOT keep exploring after you already have the answer.
 
 OUTPUT VISIBILITY: After each code execution, you will only see a short preview of the output (first ~500 characters) and its total length. The full output exists in the REPL but is NOT included in your conversation history. To retain information across iterations:
 - Store results in variables: \`const results = ...\`
 - Use console.log() for short summaries only
 - Access previously stored variables in later iterations
 
+CORRECT WORKFLOW (Simple extraction):
+✓ Step 1: console.log(context.slice(0,200));  // Quick peek
+✓ Step 2: const answer = context.match(/codename:\s*(\w+)/i)?.[1];  // Extract
+           console.log(answer);  // Verify: should show "PHOENIX"
+✓ Step 3: FINAL_VAR(answer);  // IMMEDIATE - do not write more code
+
+EXAMPLE - Finding a codename:
+  // Step 1: Explore (check what we're working with)
+  console.log(context.length);  // 290
+
+  // Step 2: Extract (assign to variable!)
+  const codename = context.match(/codename is:\s*(\w+)/i)?.[1];
+  console.log(codename);  // Must print to verify: "PHOENIX"
+
+  // Step 3: Finalize (immediately, no more code!)
+  FINAL_VAR(codename);  // Returns: "PHOENIX"
+
+INCORRECT (wastes iterations):
+✗ Extract answer, then explore more "just to be sure"
+✗ Extract answer, then extract it 3 different ways to verify
+✗ Extract answer, then write a summary instead of FINALIZING
+
+FINAL vs FINAL_VAR - WHEN TO USE EACH:
+
+Use FINAL(answer) for simple, short answers (< 100 chars):
+  Step 1: const total = data.reduce((sum, x) => sum + x.value, 0);
+           console.log("Total:", total);  // Output: Total: 42
+  Step 2: FINAL(42);  // Direct value, not a variable name
+
+Use FINAL_VAR(variableName) for computed results (ALWAYS prefer this):
+  Step 1: const extracted = context.match(/code: (\w+)/)?.[1];
+           console.log("Found:", extracted);  // Output: Found: PHOENIX
+  Step 2: FINAL_VAR(extracted);  // variableName WITHOUT quotes, NOT the value
+
+COMMON MISTAKE - DO NOT DO THIS:
+  // WRONG:
+  FINAL_VAR("extracted");  // Putting variable name in quotes
+  FINAL("extracted");      // Using string instead of actual value
+  FINAL(extracted);        // Passing variable to FINAL instead of FINAL_VAR
+
+CORRECT:
+  FINAL_VAR(extracted);    // Pass variable name (no quotes), extracts value from REPL
+  FINAL(42);              // Pass actual value directly
+
+CRITICAL - FINAL AND FINAL_VAR MUST CONTAIN ONLY THE CLEAN ANSWER:
+  // WRONG - includes descriptive text:
+  FINAL("The secret project codename is: " + answer);  // ❌ Output: "The secret project codename is: PHOENIX"
+  FINAL("Codename: " + codename);                    // ❌ Output: "Codename: PHOENIX"
+
+  // CORRECT - clean value only:
+  FINAL(answer);           // ✓ Output: "PHOENIX" (just the value)
+  FINAL_VAR(codename);     // ✓ Output: "PHOENIX" (value from variable)
+
+Put any explanation in your REASONING TEXT before the code block, NOT inside FINAL() or FINAL_VAR().
+
 When done, provide your final answer using:
-- FINAL(your_answer) - to submit directly
-- FINAL_VAR(variable_name) - to submit a variable from the REPL
+- FINAL(your_answer) - to submit directly (use for simple answers under 100 chars, value ONLY)
+- FINAL_VAR(variable_name) - to submit a variable from the REPL (preferred for computed results)
 
 Think step-by-step and show your reasoning before each code block.`;
 
@@ -792,7 +859,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           const outputMeta = [
             `Output metadata:`,
             `- Length: ${fullOutput.length} characters`,
-            `- Preview:\n${outputPreview}${fullOutput.length > previewLen ? "\n..." : ""}`,
+            `- Preview:\n${outputPreview}${
+              fullOutput.length > previewLen ? "\n..." : ""
+            }`,
             hasError ? `- Error: ${executionResult.error}` : `- Errors: none`,
             `\nFull output is stored in the REPL environment. Use variables to access computed results. Continue with the next step.`,
           ].join("\n");
