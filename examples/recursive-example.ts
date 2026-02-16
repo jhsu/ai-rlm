@@ -5,8 +5,8 @@
  * when using llm_query() with maxDepth > 1
  */
 
-import { RLMAgent } from "../src/rlm.js";
-import { model, subModel } from "./model";
+import { RLMAgent } from "../src/rlm.ts";
+import { model, subModel } from "./model.ts";
 
 async function recursiveExample() {
   console.log("\n=== Recursive RLM Example ===\n");
@@ -54,48 +54,31 @@ async function recursiveExample() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
+
+    // Access RLM-specific data via output
+    const rlmData = result.output;
 
     console.log("\n=== Result ===");
     console.log("Answer:", result.text);
-    console.log("\n=== Execution Stats ===");
-    console.log("Iterations:", result.iterations);
-    console.log("Total LLM Calls:", result.llmCallCount);
-    console.log("Max Depth Reached:", result.maxDepthReached);
-    console.log("Total Steps:", result.steps.length);
 
-    // Show depth breakdown
-    console.log("\n=== Depth Breakdown ===");
-    const depthCounts: Record<number, number> = {};
-    result.steps.forEach((step) => {
-      depthCounts[step.depth] = (depthCounts[step.depth] || 0) + 1;
-      if (step.subSteps) {
-        step.subSteps.forEach((subStep) => {
-          depthCounts[subStep.depth] = (depthCounts[subStep.depth] || 0) + 1;
-        });
-      }
-    });
+    if (rlmData) {
+      console.log("\n=== Execution Stats ===");
+      console.log("Iterations:", rlmData.iterations);
+      console.log("Total LLM Calls:", rlmData.llmCallCount);
+      console.log("Max Depth:", 2);
+      console.log("Total Steps:", rlmData.steps.length);
 
-    Object.entries(depthCounts).forEach(([depth, count]) => {
-      console.log(`  Depth ${depth}: ${count} steps`);
-    });
-
-    // Show recursive step example
-    const recursiveStep = result.steps.find(
-      (s) => s.subSteps && s.subSteps.length > 0
-    );
-    if (recursiveStep?.subSteps && recursiveStep.subSteps.length > 0) {
-      const firstSubStep = recursiveStep.subSteps[0];
-      if (firstSubStep) {
-        console.log("\n=== Recursive Call Example ===");
-        console.log(`Parent step (depth ${recursiveStep.depth}):`);
-        console.log("  Reasoning:", recursiveStep.reasoning);
-        console.log("  Code:", recursiveStep.code);
-        console.log(`\n  Sub-step (depth ${firstSubStep.depth}):`);
-        console.log("    Reasoning:", firstSubStep);
-      }
+      // Show execution trajectory
+      console.log("\n=== Execution Trajectory ===");
+      rlmData.steps.forEach((step: any, index: number) => {
+        console.log(`\nStep ${index + 1} (Iteration ${step.iteration}):`);
+        console.log("Reasoning:", step.reasoning.substring(0, 100) + "...");
+        console.log("Code:", step.code.substring(0, 80) + "...");
+        console.log("Output preview:", step.output.substring(0, 100) + "...");
+      });
     }
   } catch (error) {
     console.error("Error:", error);
