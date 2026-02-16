@@ -94,16 +94,6 @@ export interface RLMStreamResult extends RLMGenerateResult {
 }
 
 /**
- * @deprecated Use the new RLMAgent API instead. This interface is kept for backward compatibility.
- */
-export interface RLMResult {
-  answer: string;
-  trajectory: REPLStep[];
-  llmCallCount: number;
-  iterations: number;
-}
-
-/**
  * Context can be a string, array of strings, or structured data
  */
 export type RLMContext = string | string[] | Record<string, unknown>;
@@ -676,22 +666,6 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       dynamicToolCalls: [],
       staticToolResults: [],
       dynamicToolResults: [],
-      // usage: {
-      //   inputTokens: result.llmCallCount * 1000,
-      //   outputTokens: Math.ceil(result.text.length / 4),
-      //   outpuTokenDetails:
-      //   totalTokens:
-      //     result.llmCallCount * 1000 + Math.ceil(result.text.length / 4),
-      // },
-      // totalUsage: {
-      //   promptTokens: result.llmCallCount * 1000,
-      //   completionTokens: Math.ceil(result.text.length / 4),
-      //   totalTokens:
-      //     result.llmCallCount * 1000 + Math.ceil(result.text.length / 4),
-      // },
-      // [Symbol.asyncIterator]: async function* () {
-      //   yield { type: "text", text: result.text };
-      // },
     };
   }
 

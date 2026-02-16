@@ -13,7 +13,6 @@ export type {
   REPLStep,
   RLMGenerateResult,
   RLMStreamResult,
-  RLMResult,
   RLMContext,
 } from "./rlm.js";
 
