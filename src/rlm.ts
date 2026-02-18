@@ -55,8 +55,16 @@ export interface RLMAgentCallParameters {
   abortSignal?: AbortSignal;
   /** Optional timeout in milliseconds */
   timeout?: number;
-  /** Callback for each step completion */
-  onStepResult?: (step: REPLStep) => Promise<void>;
+  /** Called when iteration starts (before LLM call) */
+  onIterationStart?: (event: RLMIterationStartEvent) => Promise<void>;
+  /** Called when iteration completes (after code execution) */
+  onIterationComplete?: (event: RLMIterationCompleteEvent) => Promise<void>;
+  /** Called when LLM is invoked */
+  onLLMCall?: (event: RLMCallEvent) => Promise<void>;
+  /** Called when errors occur */
+  onError?: (event: RLMErrorEvent) => Promise<void>;
+  /** Enable debug logging */
+  debug?: boolean;
 }
 
 /**
@@ -538,11 +546,57 @@ When done, provide your final answer using:
 
 Think step-by-step and show your reasoning before each code block.`;
 
+/**
+ * Event fired when an iteration starts (before LLM is called)
+ */
+export interface RLMIterationStartEvent {
+  iteration: number;
+  messages: ModelMessage[];
+}
+
+/**
+ * Event fired when an iteration completes (after code execution)
+ */
+export interface RLMIterationCompleteEvent {
+  iteration: number;
+  step: REPLStep;
+  llmResponse: string;
+  executionTimeMs: number;
+}
+
+/**
+ * Event fired when LLM is called
+ */
+export interface RLMCallEvent {
+  prompt?: string;
+  messages?: ModelMessage[];
+  modelId: string;
+  isSubCall: boolean;
+}
+
+/**
+ * Event fired when execution errors occur
+ */
+export interface RLMErrorEvent {
+  iteration: number;
+  phase: "llm" | "execution" | "parse";
+  error: Error;
+  context: string;
+}
+
 type GenerateParams = {
   /** The large context to load into the REPL environment (not passed to the LLM) */
   context?: RLMContext;
-  /** Callback for each step completion */
-  onStepResult?: (step: REPLStep) => Promise<void>;
+  /** Callback when an iteration starts (before LLM call) */
+  onIterationStart?: (event: RLMIterationStartEvent) => Promise<void>;
+  /** Callback when an iteration completes (after code execution) */
+  onIterationComplete?: (event: RLMIterationCompleteEvent) => Promise<void>;
+  /** Callback when LLM is called */
+  onLLMCall?: (event: RLMCallEvent) => Promise<void>;
+  /** Callback when errors occur */
+  onError?: (event: RLMErrorEvent) => Promise<void>;
+  /** Enable detailed logging (default: false) */
+  debug?: boolean;
 };
 
 interface RLMAgentOutput extends Output.Output<RLMGenerateResult, any, any> {}
@@ -578,7 +632,14 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
   ): Promise<GenerateTextResult<{}, RLMAgentOutput>> {
     // Extract parameters from Agent interface
     const { prompt, messages, abortSignal, timeout, options } = params;
-    const { context: explicitContext, onStepResult } = options ?? {};
+    const {
+      context: explicitContext,
+      onIterationStart,
+      onIterationComplete,
+      onLLMCall,
+      onError,
+      debug,
+    } = options ?? {};
 
     // Determine context and query
     // Priority: explicit context param > system message content > fallback
@@ -635,7 +696,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       query,
       abortSignal,
       timeout: typeof timeout === "number" ? timeout : undefined,
-      onStepResult,
+      onIterationStart,
+      onIterationComplete,
+      onLLMCall,
+      onError,
+      debug,
     });
 
     // Return a proper GenerateTextResult that matches the Agent interface
@@ -678,8 +743,13 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     query,
     abortSignal,
     timeout,
-    onStepResult,
+    onIterationStart,
+    onIterationComplete,
+    onLLMCall,
+    onError,
+    debug = false,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
+    const startTime = Date.now();
     const repl = new REPLEnvironment({
       model: this.settings.model,
       subModel: this.settings.subModel,
@@ -693,6 +763,31 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
+
+    const log = (msg: string, ...args: unknown[]) => {
+      if (debug || this.settings.verbose) {
+        console.log(`[RLM ${Date.now() - startTime}ms] ${msg}`, ...args);
+      }
+    };
+
+    const emitError = async (
+      phase: RLMErrorEvent["phase"],
+      error: Error,
+      ctx: string
+    ) => {
+      if (onError) {
+        try {
+          await onError({
+            iteration: steps.length,
+            phase,
+            error,
+            context: ctx,
+          });
+        } catch (e) {
+          log("Error in onError callback:", e);
+        }
+      }
+    };
 
     try {
       repl.loadContext(context);
@@ -742,13 +837,43 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           );
         }
 
+        // Fire iteration start event
+        const iterationStartTime = Date.now();
+        if (onIterationStart) {
+          try {
+            await onIterationStart({ iteration: iteration + 1, messages });
+          } catch (e) {
+            log("Error in onIterationStart callback:", e);
+          }
+        }
+
         // Generate next action
-        const result = await generateText({
-          model: this.settings.model,
-          messages,
-          abortSignal,
-        });
-        mainLLMCallCount++; // Track main LLM call
+        let result;
+        try {
+          result = await generateText({
+            model: this.settings.model,
+            messages,
+            abortSignal,
+          });
+          mainLLMCallCount++; // Track main LLM call
+
+          // Fire LLM call event
+          if (onLLMCall) {
+            try {
+              await onLLMCall({
+                messages,
+                modelId: "rlm-model",
+                isSubCall: false,
+              });
+            } catch (e) {
+              log("Error in onLLMCall callback:", e);
+            }
+          }
+        } catch (e) {
+          const error = e instanceof Error ? e : new Error(String(e));
+          await emitError("llm", error, "generateText failed");
+          throw error;
+        }
 
         const response = result.text;
 
@@ -771,6 +896,27 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
                 : `[Variable ${finalAnswer.content} not found]`;
           }
 
+          // Fire iteration complete for final answer (no code executed)
+          if (onIterationComplete) {
+            try {
+              await onIterationComplete({
+                iteration: iteration + 1,
+                step: {
+                  iteration: iteration + 1,
+                  reasoning: response.substring(0, 200),
+                  code: `FINAL${
+                    finalAnswer.type === "variable" ? "_VAR" : ""
+                  }(${finalAnswer.content})`,
+                  output: `Final answer: ${answer}`,
+                },
+                llmResponse: response,
+                executionTimeMs: Date.now() - iterationStartTime,
+              });
+            } catch (e) {
+              log("Error in onIterationComplete callback for final answer:", e);
+            }
+          }
+
           // Return RLMGenerateResult
           return {
             text: answer,
@@ -786,7 +932,23 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
 
         if (codeBlocks.length > 0 && codeBlocks[0]) {
           const code: string = codeBlocks[0];
-          const executionResult = await repl.executeJavaScript(code);
+          let executionResult;
+          try {
+            executionResult = await repl.executeJavaScript(code);
+          } catch (e) {
+            const error = e instanceof Error ? e : new Error(String(e));
+            await emitError(
+              "execution",
+              error,
+              `Code execution failed: ${code.substring(0, 100)}`
+            );
+            // Continue with error result
+            executionResult = {
+              stdout: "",
+              stderr: error.message,
+              error: error.message,
+            };
+          }
 
           // Build full output (llm_query and sub_rlm now return values directly)
           let fullOutput = executionResult.stdout;
@@ -825,6 +987,21 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           // Add to steps array
           steps.push(step);
 
+          // Fire iteration complete event
+          const iterationDuration = Date.now() - iterationStartTime;
+          if (onIterationComplete) {
+            try {
+              await onIterationComplete({
+                iteration: iteration + 1,
+                step,
+                llmResponse: response,
+                executionTimeMs: iterationDuration,
+              });
+            } catch (e) {
+              log("Error in onIterationComplete callback:", e);
+            }
+          }
+
           // Build constant-size metadata about stdout for LLM history
           // Per Algorithm 1: only Metadata(stdout) is appended, not full output
           const previewLen = this.settings.maxHistoryPreview;
@@ -848,15 +1025,6 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
               content: outputMeta,
             }
           );
-
-          // Call onStepFinish callback if provided
-          if (onStepResult) {
-            try {
-              await onStepResult(step);
-            } catch (error) {
-              console.error("Error in onStepFinish callback:", error);
-            }
-          }
         } else {
           messages.push(
             { role: "assistant", content: response },
