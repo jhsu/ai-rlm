@@ -52,22 +52,27 @@ export async function example1SimpleTextSearch() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
 
     console.log("✓ Answer:", result.text);
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
 
-    // Show the trajectory
-    console.log("\n--- Execution Trajectory ---");
-    result.steps.forEach((step) => {
-      console.log(`\nStep ${step.iteration}:`);
-      console.log("Reasoning:", step.reasoning.substring(0, 100) + "...");
-      console.log("Code:", step.code.substring(0, 80) + "...");
-      console.log("Output:", step.output.substring(0, 100) + "...");
-    });
+    // Access RLM-specific data via output
+    const rlmData = result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
+
+      // Show the trajectory
+      console.log("\n--- Execution Trajectory ---");
+      rlmData.steps.forEach((step: any) => {
+        console.log(`\nStep ${step.iteration}:`);
+        console.log("Reasoning:", step.reasoning);
+        console.log("Code:", step.code);
+        console.log("Output:", step.output);
+      });
+    }
 
     return result;
   } catch (error) {
@@ -118,24 +123,28 @@ export async function example2DataAnalysis() {
   console.log("Query:", query);
   console.log(
     "Data:",
-    JSON.stringify(context, null, 2).substring(0, 200) + "...\n",
+    JSON.stringify(context, null, 2).substring(0, 200) + "...\n"
   );
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
 
     console.log("✓ Answer:", result.text);
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
 
-    console.log("\n--- Key Code Executed ---");
-    result.steps.forEach((step) => {
-      console.log(`\nStep ${step.iteration}:`);
-      console.log("Code:\n", step.code);
-    });
+    const rlmData = result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
+
+      console.log("\n--- Key Code Executed ---");
+      rlmData.steps.forEach((step: any) => {
+        console.log(`\nStep ${step.iteration}:`);
+        console.log("Code:\n", step.code);
+      });
+    }
 
     return result;
   } catch (error) {
@@ -192,8 +201,8 @@ export async function example3NeedleInHaystack() {
   try {
     const startTime = Date.now();
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
     const duration = (Date.now() - startTime) / 1000;
 
@@ -201,18 +210,22 @@ export async function example3NeedleInHaystack() {
     console.log("✓ Expected:", targetValue);
     console.log(
       "✓ Match:",
-      result.text.includes(targetValue) ? "✅ YES" : "❌ NO",
+      result.text.includes(targetValue) ? "✅ YES" : "❌ NO"
     );
     console.log("✓ Duration:", duration.toFixed(2), "seconds");
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
 
-    console.log("\n--- Search Strategy Used ---");
-    result.steps.slice(0, 3).forEach((step) => {
-      console.log(`\nStep ${step.iteration}:`);
-      console.log("Reasoning:", step.reasoning.substring(0, 120) + "...");
-      console.log("Code:", step.code.substring(0, 100) + "...");
-    });
+    const rlmData = result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
+
+      console.log("\n--- Search Strategy Used ---");
+      rlmData.steps.slice(0, 3).forEach((step: any) => {
+        console.log(`\nStep ${step.iteration}:`);
+        console.log("Reasoning:", step.reasoning.substring(0, 120) + "...");
+        console.log("Code:", step.code);
+      });
+    }
 
     return result;
   } catch (error) {
@@ -256,6 +269,7 @@ export async function example4SemanticAnalysis() {
     model,
     subModel,
     maxIterations: 12,
+    maxDepth: 10,
     maxLLMCalls: 15, // More calls needed for semantic analysis
     verbose: false,
   });
@@ -265,38 +279,42 @@ export async function example4SemanticAnalysis() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
 
     console.log("✓ Answer:", result.text);
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
 
-    console.log("\n--- Analysis Approach ---");
-    console.log(`Total steps: ${result.steps.length}`);
+    const rlmData = result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
-    // Show all steps
-    result.steps.forEach((step) => {
-      console.log(`\nStep ${step.iteration}:`);
-      console.log("Reasoning:", step.reasoning.substring(0, 100) + "...");
-      console.log("Code:", step.code.substring(0, 150) + "...");
-    });
+      console.log("\n--- Analysis Approach ---");
+      console.log(`Total steps: ${rlmData.steps.length}`);
 
-    // Highlight sub-LLM queries if any
-    const subLLMSteps = result.steps.filter((step) =>
-      step.code.includes("llm_query"),
-    );
-    if (subLLMSteps.length > 0) {
-      console.log(`\n--- Sub-LLM Queries (${subLLMSteps.length}) ---`);
-      subLLMSteps.forEach((step) => {
+      // Show all steps
+      rlmData.steps.forEach((step: any) => {
         console.log(`\nStep ${step.iteration}:`);
-        console.log("Code:", step.code.substring(0, 200) + "...");
+        console.log("Reasoning:", step.reasoning.substring(0, 100) + "...");
+        console.log("Code:", step.code);
       });
-    } else {
-      console.log(
-        "\n(No sub-LLM queries used - analysis done purely with code)",
+
+      // Highlight sub-LLM queries if any
+      const subLLMSteps = rlmData.steps.filter((step: any) =>
+        step.code.includes("llm_query")
       );
+      if (subLLMSteps.length > 0) {
+        console.log(`\n--- Sub-LLM Queries (${subLLMSteps.length}) ---`);
+        subLLMSteps.forEach((step: any) => {
+          console.log(`\nStep ${step.iteration}:`);
+          console.log("Code:", step.code);
+        });
+      } else {
+        console.log(
+          "\n(No sub-LLM queries used - analysis done purely with code)"
+        );
+      }
     }
 
     return result;
@@ -350,25 +368,29 @@ export async function example5PatternExtraction() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
 
     console.log("✓ Answer:", result.text);
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
 
-    console.log("\n--- Pattern Matching Code ---");
-    result.steps.forEach((step) => {
-      if (
-        step.code.includes("match") ||
-        step.code.includes("RegExp") ||
-        step.code.includes("extract")
-      ) {
-        console.log(`\nStep ${step.iteration}:`);
-        console.log("Code:\n", step.code);
-      }
-    });
+    const rlmData = result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
+
+      console.log("\n--- Pattern Matching Code ---");
+      rlmData.steps.forEach((step: any) => {
+        if (
+          step.code.includes("match") ||
+          step.code.includes("RegExp") ||
+          step.code.includes("extract")
+        ) {
+          console.log(`\nStep ${step.iteration}:`);
+          console.log("Code:\n", step.code);
+        }
+      });
+    }
 
     return result;
   } catch (error) {
@@ -411,8 +433,8 @@ export async function example6Streaming() {
 
   try {
     const result = await agent.stream({
-      context,
-      query,
+      options: { context },
+      prompt: query,
     });
 
     console.log("Answer received via stream:");
@@ -429,8 +451,12 @@ export async function example6Streaming() {
     }
 
     console.log("\n\n✓ Full Answer:", fullText);
-    console.log("✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+
+    const rlmData = await result.output;
+    if (rlmData) {
+      console.log("✓ Iterations:", rlmData.iterations);
+      console.log("✓ LLM Calls:", rlmData.llmCallCount);
+    }
 
     return result;
   } catch (error) {
@@ -527,13 +553,6 @@ export async function runAllExamples() {
     console.log("Summary");
     console.log("=".repeat(60));
     console.log("\nExamples completed successfully!");
-    console.log(
-      "Total LLM calls across examples:",
-      Object.values(results).reduce(
-        (sum, r) => sum + (r?.llmCallCount || 0),
-        0,
-      ),
-    );
 
     return results;
   } catch (error) {

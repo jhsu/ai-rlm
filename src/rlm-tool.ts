@@ -5,7 +5,8 @@
  * with the Vercel AI SDK's generateText, ToolLoopAgent, or any tool-compatible API.
  */
 
-import { tool, type LanguageModel } from "ai";
+import { tool } from "ai";
+import type { LanguageModel } from "ai";
 import { z } from "zod";
 import { RLMAgent, type RLMAgentSettings } from "./rlm.js";
 
@@ -14,9 +15,9 @@ import { RLMAgent, type RLMAgentSettings } from "./rlm.js";
  */
 export interface RLMToolConfig extends Partial<RLMAgentSettings> {
   /** Model for the root agent */
-  model: LanguageModel;
+  model?: LanguageModel;
   /** Model for sub-LLM queries (defaults to model) */
-  subModel: LanguageModel;
+  subModel?: LanguageModel;
   /** Maximum iterations for the REPL loop (default: 20) */
   maxIterations?: number;
   /** Maximum sub-LLM calls per execution (default: 50) */
@@ -41,18 +42,18 @@ export interface RLMToolConfig extends Partial<RLMAgentSettings> {
  * import { generateText } from 'ai';
  *
  * const rlmTool = createRLMTool({
- *   model: 'gpt-4.1',
- *   subModel: 'gpt-4.1-mini',
+ *   model: openai('gpt-4.1'),
+ *   subModel: openai('gpt-4.1-mini'),
  * });
  *
  * const result = await generateText({
- *   model: 'gpt-4.1',
- *   tools: { analyzeLargeContext: rlmTool },
+ *   model: openai('gpt-4.1'),
+ *   tools: { deepAnalyze: rlmTool },
  *   prompt: 'Find all security issues in this codebase',
  * });
  * ```
  */
-export function createRLMTool(config: RLMToolConfig) {
+export function createRLMTool(config: RLMToolConfig = {}) {
   return tool({
     description: `Analyze large contexts iteratively using JavaScript code execution.
 
@@ -64,7 +65,7 @@ Use this tool when you need to:
 
 The tool will:
 1. Write JavaScript code to explore the context
-2. Execute the code in a secure sandbox (vm2)
+2. Execute the code in a secure sandbox (node:vm)
 3. Use sub-LLM calls for semantic understanding when needed
 4. Iterate until it finds the answer
 
@@ -75,9 +76,7 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
         .union([
           z.string().describe("Text document or content to analyze"),
           z.array(z.string()).describe("Array of text lines or documents"),
-          z
-            .record(z.string(), z.unknown())
-            .describe("JSON object or structured data"),
+          z.any().describe("JSON object or structured data"),
         ])
         .describe("The large context, document, or dataset to analyze"),
 
@@ -108,7 +107,7 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
     ) => {
       // Create RLMAgent with merged config
       const agent = new RLMAgent({
-        model: config.model ?? "gpt-4.1",
+        model: config.model!,
         subModel: config.subModel,
         maxIterations: maxIterations ?? config.maxIterations ?? 20,
         maxLLMCalls: maxLLMCalls ?? config.maxLLMCalls ?? 50,
@@ -117,9 +116,21 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
       });
 
       // Execute the analysis
+      // Convert context to string if needed
+      const contextStr =
+        typeof context === "string"
+          ? context
+          : Array.isArray(context)
+          ? context.join("\n")
+          : JSON.stringify(context, null, 2);
+
       const result = await agent.generate({
-        context,
-        query,
+        messages: [
+          {
+            role: "user",
+            content: `Context:\n${contextStr}\n\nQuery: ${query}`,
+          },
+        ],
         abortSignal,
       });
 
@@ -140,14 +151,14 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
  * ```typescript
  * // Create a tool optimized for code analysis
  * const codeAnalyzer = createRLMTool({
- *   model: 'gpt-4.1',
- *   subModel: 'gpt-4.1-mini',
+ *   model: openai('gpt-4.1'),
+ *   subModel: openai('gpt-4.1-mini'),
  *   maxIterations: 30,
  *   maxLLMCalls: 50,
  * });
  * ```
  */
-export function createRLMToolForCodeAnalysis(config: RLMToolConfig) {
+export function createRLMToolForCodeAnalysis(config: RLMToolConfig = {}) {
   return createRLMTool({
     model: config.model,
     subModel: config.subModel,
@@ -163,15 +174,15 @@ export function createRLMToolForCodeAnalysis(config: RLMToolConfig) {
  * @example
  * ```typescript
  * const logAnalyzer = createRLMToolForLogAnalysis({
- *   model: 'gpt-4.1',
+ *   model: openai('gpt-4.1'),
  *   maxIterations: 25,
  * });
  * ```
  */
-export function createRLMToolForLogAnalysis(config: RLMToolConfig) {
+export function createRLMToolForLogAnalysis(config: RLMToolConfig = {}) {
   return createRLMTool({
-    model: config.model ?? "gpt-4.1",
-    subModel: config.subModel ?? "gpt-4.1-mini",
+    model: config.model,
+    subModel: config.subModel,
     maxIterations: config.maxIterations ?? 25,
     maxLLMCalls: config.maxLLMCalls ?? 30,
     maxOutputChars: config.maxOutputChars ?? 100000,
@@ -184,19 +195,23 @@ export function createRLMToolForLogAnalysis(config: RLMToolConfig) {
  * @example
  * ```typescript
  * const documentSearcher = createRLMToolForDocumentSearch({
- *   model: 'gpt-4.1',
+ *   model: openai('gpt-4.1'),
  *   maxIterations: 20,
  * });
  * ```
  */
-export function createRLMToolForDocumentSearch(config: RLMToolConfig) {
+export function createRLMToolForDocumentSearch(config: RLMToolConfig = {}) {
   return createRLMTool({
-    model: config.model ?? "gpt-4.1",
-    subModel: config.subModel ?? "gpt-4.1-mini",
+    model: config.model,
+    subModel: config.subModel,
     maxIterations: config.maxIterations ?? 20,
     maxLLMCalls: config.maxLLMCalls ?? 20,
     maxOutputChars: config.maxOutputChars ?? 100000,
   });
 }
+
+// ============================================================================
+// Export
+// ============================================================================
 
 export default createRLMTool;
