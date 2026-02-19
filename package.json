@@ -56,7 +56,10 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@jitl/quickjs-wasmfile-release-asyncify": "^0.32.0",
+    "quickjs-emscripten": "^0.32.0"
+  },
   "optionalDependencies": {},
   "peerDependencies": {
     "ai": "^6.0.0",

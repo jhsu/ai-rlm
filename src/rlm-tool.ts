@@ -65,7 +65,7 @@ Use this tool when you need to:
 
 The tool will:
 1. Write JavaScript code to explore the context
-2. Execute the code in a secure sandbox (node:vm)
+2. Execute the code in a secure sandbox (QuickJS WebAssembly)
 3. Use sub-LLM calls for semantic understanding when needed
 4. Iterate until it finds the answer
 
@@ -125,20 +125,18 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
           : JSON.stringify(context, null, 2);
 
       const result = await agent.generate({
-        messages: [
-          {
-            role: "user",
-            content: `Context:\n${contextStr}\n\nQuery: ${query}`,
-          },
-        ],
+        prompt: query,
+        options: {
+          context,
+        },
         abortSignal,
       });
 
       // Return just the essential information
       return {
         answer: result.text,
-        iterations: result.iterations,
-        stepsTaken: result.steps.length,
+        iterations: result.output.iterations,
+        stepsTaken: result.output.steps.length,
       };
     },
   });
