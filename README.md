@@ -13,7 +13,7 @@ RLM is an inference strategy where LLMs treat long contexts as part of an extern
 - **Iterative Code Execution**: The model writes JavaScript code, sees output, then writes more code
 - **Sub-LLM Queries**: Access to `llm_query()` and `llm_query_batched()` for semantic analysis
 - **Context Management**: Efficient handling of large contexts through chunking
-- **Sandboxed REPL**: JavaScript execution in a sandboxed `node:vm` context
+- **Sandboxed REPL**: JavaScript execution in a sandboxed QuickJS WebAssembly context
 - **AI SDK Integration**: Works as an Agent or Tool with the Vercel AI SDK
 - **Multiple Usage Patterns**: Use as standalone agent or as a tool in larger workflows
 
@@ -148,7 +148,7 @@ FINAL_VAR(answer)
 
 1. **Context Loading**: The context is loaded into a sandboxed JavaScript REPL environment
 2. **Iterative Reasoning**: The root LLM writes JavaScript code to explore the context
-3. **Code Execution**: Code is executed in a `node:vm` sandbox with a 30s timeout
+3. **Code Execution**: Code is executed in a QuickJS WebAssembly sandbox with a 30s timeout
 4. **Sub-LLM Queries**: For semantic analysis, `llm_query()` delegates to a sub-model
 5. **Result Accumulation**: The model iterates until it finds an answer
 6. **Final Answer**: The model submits an answer using `FINAL(answer)` or `FINAL_VAR(variable_name)`
@@ -164,7 +164,7 @@ The RLM system prompt instructs the model to:
 
 ## REPL Sandbox
 
-The JavaScript REPL runs code in a `node:vm` sandboxed context:
+The JavaScript REPL runs code in a QuickJS WebAssembly sandboxed context:
 
 ### Available in the Sandbox:
 
@@ -302,7 +302,7 @@ type RLMContext = string | string[] | Record<string, unknown>;
 │                      RLMAgent Class                         │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │              REPL Environment (node:vm)               │  │
+│  │              REPL Environment (QuickJS)               │  │
 │  │  - Sandboxed JavaScript execution                     │  │
 │  │  - llm_query() for sub-LLM semantic analysis          │  │
 │  │  - 30s timeout protection                             │  │

@@ -12,7 +12,7 @@ async function recursiveExample() {
   console.log("\n=== Recursive RLM Example ===\n");
 
   // Context that requires multi-level analysis
-  const context = `
+  const context = `\
     Company Structure:
 
     Engineering Department:
@@ -45,16 +45,30 @@ async function recursiveExample() {
     subModel,
     maxIterations: 15,
     maxLLMCalls: 30,
-    maxDepth: 2, // Enable recursive calls
+    maxDepth: 3, // Enable recursive calls
     verbose: true,
   });
 
   console.log("Query:", query);
-  console.log("Max recursion depth: 2\n");
+  console.log("Max recursion depth: 3\n");
 
   try {
     const result = await agent.generate({
-      options: { context },
+      options: {
+        context,
+        onIterationStart: (evt) => {
+          console.log("---iteration start---");
+        },
+        onIterationComplete: (evt) => {
+          console.log("---iteration complete---");
+        },
+        onLLMCall: (call) => {
+          console.log("- LLM called");
+        },
+        onError: (error) => {
+          console.error("- Error:", error);
+        },
+      },
       prompt: query,
     });
 

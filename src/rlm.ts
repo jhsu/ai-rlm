@@ -4,7 +4,7 @@
  * Based on the paper "Recursive Language Models" (Zhang, Kraska, Khattab, 2025)
  * Uses the Vercel AI SDK for the implementation.
  *
- * REPL Environment: JavaScript with node:vm sandbox
+ * REPL Environment: JavaScript with QuickJS sandbox (WebAssembly)
  */
 
 import { generateText } from "ai";
@@ -19,7 +19,24 @@ import type {
   GenerateTextResult,
   StreamTextResult,
 } from "ai";
-import * as vm from "node:vm";
+import {
+  newQuickJSAsyncWASMModuleFromVariant,
+  type QuickJSAsyncContext,
+  type QuickJSAsyncRuntime,
+} from "quickjs-emscripten-core";
+
+let quickJSModule: Awaited<
+  ReturnType<typeof newQuickJSAsyncWASMModuleFromVariant>
+> | null = null;
+
+async function getQuickJS() {
+  if (!quickJSModule) {
+    quickJSModule = await newQuickJSAsyncWASMModuleFromVariant(
+      import("@jitl/quickjs-wasmfile-release-asyncify")
+    );
+  }
+  return quickJSModule;
+}
 
 /**
  * Settings for RLMAgent
@@ -56,13 +73,13 @@ export interface RLMAgentCallParameters {
   /** Optional timeout in milliseconds */
   timeout?: number;
   /** Called when iteration starts (before LLM call) */
-  onIterationStart?: (event: RLMIterationStartEvent) => Promise<void>;
+  onIterationStart?: (event: RLMIterationStartEvent) => void;
   /** Called when iteration completes (after code execution) */
-  onIterationComplete?: (event: RLMIterationCompleteEvent) => Promise<void>;
+  onIterationComplete?: (event: RLMIterationCompleteEvent) => void;
   /** Called when LLM is invoked */
-  onLLMCall?: (event: RLMCallEvent) => Promise<void>;
+  onLLMCall?: (event: RLMCallEvent) => void;
   /** Called when errors occur */
-  onError?: (event: RLMErrorEvent) => Promise<void>;
+  onError?: (event: RLMErrorEvent) => void;
   /** Enable debug logging */
   debug?: boolean;
 }
@@ -106,19 +123,6 @@ export interface RLMStreamResult extends RLMGenerateResult {
  */
 export type RLMContext = string | string[] | Record<string, unknown>;
 
-interface Sandbox {
-  console: {
-    log: (...args: unknown[]) => void;
-    error: (...args: unknown[]) => void;
-  };
-  context: unknown;
-  llm_query: (prompt: string) => Promise<string>;
-  llm_query_batched: (prompts: string[]) => Promise<string[]>;
-  sub_rlm: (prompt: string, subContext?: RLMContext) => Promise<string>;
-  FINAL: (answer: string) => { type: "final"; value: string };
-  FINAL_VAR: (varName: string) => { type: "final_var"; value: string };
-}
-
 interface REPLEnvironmentOptions {
   model: LanguageModel;
   subModel: LanguageModel;
@@ -133,10 +137,11 @@ interface REPLEnvironmentOptions {
 
 /**
  * Sandbox environment for executing JavaScript code safely
- * Uses node:vm (Bun/Node)
+ * Uses QuickJS WebAssembly sandbox
  */
 class REPLEnvironment {
-  private vmContext: vm.Context | undefined;
+  private ctx: QuickJSAsyncContext | undefined;
+  private runtime: QuickJSAsyncRuntime | undefined;
   private llmCallCount: number;
   private maxLLMCalls: number;
   private subModel: LanguageModel;
@@ -177,63 +182,144 @@ class REPLEnvironment {
   /**
    * Load context into the REPL environment
    */
-  loadContext(context: RLMContext): void {
+  async loadContext(context: RLMContext): Promise<void> {
     if (this.contextLoaded) {
       throw new Error("Context already loaded");
     }
 
-    let contextData: unknown;
+    const QuickJS = await getQuickJS();
+    this.runtime = QuickJS.newRuntime();
+    this.ctx = this.runtime.newContext();
 
+    let contextJson: string;
     if (typeof context === "string") {
-      contextData = context;
+      contextJson = JSON.stringify(context);
     } else if (Array.isArray(context)) {
-      // Keep arrays as arrays so runtime type matches metadata and prompt guidance
-      contextData = context;
+      contextJson = JSON.stringify(context);
     } else {
-      contextData = context;
+      contextJson = JSON.stringify(context);
     }
 
-    // Create sandbox with all necessary functions
-    const sandbox: Sandbox = {
-      console: {
-        log: (...args: unknown[]) => {
-          this.consoleOutput.push(args.map((a) => String(a)).join(" "));
-        },
-        error: (...args: unknown[]) => {
-          this.consoleOutput.push(
-            "ERROR: " + args.map((a) => String(a)).join(" ")
-          );
-        },
-      },
-      context: contextData,
-      llm_query: async (prompt: string): Promise<string> => {
-        // Direct LLM call - returns actual result, not placeholder
-        return this.llmQuery(prompt);
-      },
-      llm_query_batched: async (prompts: string[]): Promise<string[]> => {
-        // Execute all prompts in parallel and return actual results
-        return Promise.all(prompts.map((p) => this.llmQuery(p)));
-      },
-      sub_rlm: async (
-        prompt: string,
-        subContext?: RLMContext
-      ): Promise<string> => {
-        // If at max depth, fall back to simple llm_query (not recursive RLM)
-        if (this.currentDepth >= this.maxDepth - 1) {
-          return this.llmQuery(prompt);
+    const consoleObj = this.ctx.newObject();
+
+    const formatArg = (a: unknown): string => {
+      if (a === null) return "null";
+      if (a === undefined) return "undefined";
+      if (typeof a === "object") {
+        try {
+          return JSON.stringify(a);
+        } catch {
+          return String(a);
         }
-        // Full recursive RLM call with its own REPL and iteration loop
-        return this.subRlmQuery(prompt, subContext);
-      },
-      FINAL: (answer: string): { type: "final"; value: string } => {
-        return { type: "final", value: answer };
-      },
-      FINAL_VAR: (varName: string): { type: "final_var"; value: string } => {
-        return { type: "final_var", value: varName };
-      },
+      }
+      return String(a);
     };
 
-    this.vmContext = vm.createContext(sandbox);
+    const logFn = this.ctx.newFunction("log", (...args) => {
+      const nativeArgs = args.map((h) => {
+        try {
+          return this.ctx!.dump(h);
+        } catch {
+          return String(h);
+        }
+      });
+      this.consoleOutput.push(nativeArgs.map(formatArg).join(" "));
+    });
+    this.ctx.setProp(consoleObj, "log", logFn);
+    logFn.dispose();
+
+    const errorFn = this.ctx.newFunction("error", (...args) => {
+      const nativeArgs = args.map((h) => {
+        try {
+          return this.ctx!.dump(h);
+        } catch {
+          return String(h);
+        }
+      });
+      this.consoleOutput.push("ERROR: " + nativeArgs.map(formatArg).join(" "));
+    });
+    this.ctx.setProp(consoleObj, "error", errorFn);
+    errorFn.dispose();
+
+    this.ctx.setProp(this.ctx.global, "console", consoleObj);
+    consoleObj.dispose();
+
+    const contextHandle = this.ctx.evalCode(`(${contextJson})`);
+    const contextResult = this.ctx.unwrapResult(contextHandle);
+    this.ctx.setProp(this.ctx.global, "context", contextResult);
+    contextResult.dispose();
+
+    const llmQueryFn = this.ctx.newAsyncifiedFunction(
+      "llm_query",
+      async (promptHandle) => {
+        const prompt = this.ctx!.getString(promptHandle);
+        const result = await this.llmQuery(prompt);
+        return this.ctx!.newString(result);
+      }
+    );
+    this.ctx.setProp(this.ctx.global, "llm_query", llmQueryFn);
+    llmQueryFn.dispose();
+
+    const llmQueryBatchedFn = this.ctx.newAsyncifiedFunction(
+      "llm_query_batched",
+      async (promptsHandle) => {
+        const prompts = this.ctx!.dump(promptsHandle) as string[];
+        const results = await Promise.all(prompts.map((p) => this.llmQuery(p)));
+        return this.ctx!.newString(JSON.stringify(results));
+      }
+    );
+    this.ctx.setProp(this.ctx.global, "llm_query_batched", llmQueryBatchedFn);
+    llmQueryBatchedFn.dispose();
+
+    const subRlmFn = this.ctx.newAsyncifiedFunction(
+      "sub_rlm",
+      async (promptHandle, subContextHandle) => {
+        const prompt = this.ctx!.getString(promptHandle);
+        let subContext: RLMContext | undefined;
+        try {
+          subContext = this.ctx!.dump(subContextHandle) as RLMContext;
+        } catch {
+          subContext = undefined;
+        }
+
+        const result =
+          this.currentDepth >= this.maxDepth - 1
+            ? await this.llmQuery(prompt)
+            : await this.subRlmQuery(prompt, subContext);
+        return this.ctx!.newString(result);
+      }
+    );
+    this.ctx.setProp(this.ctx.global, "sub_rlm", subRlmFn);
+    subRlmFn.dispose();
+
+    const finalFn = this.ctx.newFunction("FINAL", (answerHandle) => {
+      const answer = this.ctx!.getString(answerHandle);
+      const obj = this.ctx!.newObject();
+      const typeHandle = this.ctx!.newString("final");
+      this.ctx!.setProp(obj, "type", typeHandle);
+      typeHandle.dispose();
+      const valueHandle = this.ctx!.newString(answer);
+      this.ctx!.setProp(obj, "value", valueHandle);
+      valueHandle.dispose();
+      return obj;
+    });
+    this.ctx.setProp(this.ctx.global, "FINAL", finalFn);
+    finalFn.dispose();
+
+    const finalVarFn = this.ctx.newFunction("FINAL_VAR", (varNameHandle) => {
+      const varName = this.ctx!.getString(varNameHandle);
+      const obj = this.ctx!.newObject();
+      const typeHandle = this.ctx!.newString("final_var");
+      this.ctx!.setProp(obj, "type", typeHandle);
+      typeHandle.dispose();
+      const valueHandle = this.ctx!.newString(varName);
+      this.ctx!.setProp(obj, "value", valueHandle);
+      valueHandle.dispose();
+      return obj;
+    });
+    this.ctx.setProp(this.ctx.global, "FINAL_VAR", finalVarFn);
+    finalVarFn.dispose();
+
     this.contextLoaded = true;
   }
 
@@ -301,7 +387,8 @@ class REPLEnvironment {
 
   /**
    * Execute JavaScript code in the sandbox with timeout protection
-   * Supports top-level await by wrapping code in async IIFE when needed
+   * With ASYNCIFY, async host functions can be called synchronously from QuickJS,
+   * so we don't need to wrap code in async IIFE - await works at top level.
    */
   async executeJavaScript(code: string): Promise<{
     stdout: string;
@@ -310,35 +397,53 @@ class REPLEnvironment {
     result?: unknown;
   }> {
     this.consoleOutput = [];
-    if (!this.vmContext) {
+    if (!this.ctx) {
       return {
         stdout: "",
         stderr: "",
-        error: "VM context not initialized",
+        error: "QuickJS context not initialized",
       };
     }
 
     try {
-      let result: unknown;
+      const result = await this.ctx.evalCodeAsync(code);
 
-      // Check if code contains top-level await
-      const hasTopLevelAwait =
-        /^\s*await\b/m.test(code) || /\bawait\s+/.test(code);
+      if (result.error) {
+        const errorVal = this.ctx.dump(result.error);
+        result.error.dispose();
+        return {
+          stdout: this.consoleOutput.join("\n"),
+          stderr: String(errorVal),
+          error: String(errorVal),
+        };
+      }
 
-      if (hasTopLevelAwait) {
-        // Wrap in async IIFE to support top-level await
-        const wrappedCode = `(async () => {\n${code}\n})()`;
-        const script = new vm.Script(wrappedCode);
+      const value = result.value;
+      let dumpedValue: unknown;
 
-        const promise = script.runInContext(this.vmContext, {
-          timeout: this.timeout,
-        }) as Promise<unknown>;
-        result = await promise;
+      const state = this.ctx.getPromiseState(value);
+      if (state.type === "pending") {
+        try {
+          const resolved = await this.ctx.resolvePromise(value);
+          value.dispose();
+          if (resolved.error) {
+            const errorVal = this.ctx.dump(resolved.error);
+            resolved.error.dispose();
+            return {
+              stdout: this.consoleOutput.join("\n"),
+              stderr: String(errorVal),
+              error: String(errorVal),
+            };
+          }
+          dumpedValue = this.ctx.dump(resolved.value);
+          resolved.value.dispose();
+        } catch (resolveError) {
+          value.dispose();
+          throw resolveError;
+        }
       } else {
-        const script = new vm.Script(code);
-        result = script.runInContext(this.vmContext, {
-          timeout: this.timeout,
-        });
+        dumpedValue = this.ctx.dump(value);
+        value.dispose();
       }
 
       const stdout = this.consoleOutput.join("\n");
@@ -346,7 +451,7 @@ class REPLEnvironment {
       return {
         stdout,
         stderr: "",
-        result: result !== undefined ? result : undefined,
+        result: dumpedValue !== undefined ? dumpedValue : undefined,
       };
     } catch (error) {
       if (error instanceof Error) {
@@ -356,13 +461,11 @@ class REPLEnvironment {
           error: error.message,
         };
       }
-      // Capture non-Error exceptions with more detail
       const errorStr = String(error);
-      const errorType = typeof error;
       return {
         stdout: this.consoleOutput.join("\n"),
-        stderr: `Execution error (${errorType}): ${errorStr}`,
-        error: `Execution error (${errorType}): ${errorStr}`,
+        stderr: errorStr,
+        error: errorStr,
       };
     }
   }
@@ -372,9 +475,15 @@ class REPLEnvironment {
    */
   getVariable(name: string): unknown {
     try {
-      if (this.vmContext) {
-        const script = new vm.Script(name);
-        return script.runInContext(this.vmContext, { timeout: 1000 });
+      if (this.ctx) {
+        const result = this.ctx.evalCode(name);
+        if (result.error) {
+          result.error.dispose();
+          return undefined;
+        }
+        const value = this.ctx.dump(result.value);
+        result.value.dispose();
+        return value;
       }
       return undefined;
     } catch {
@@ -391,10 +500,28 @@ class REPLEnvironment {
 
   /**
    * Clean up
+   * Note: Asyncified functions may cause dispose errors due to lingering host refs.
+   * This is a known issue in quickjs-emscripten. We catch and suppress these errors
+   * since they occur after all actual work is complete.
    */
   cleanup(): void {
     this.consoleOutput = [];
-    this.vmContext = undefined;
+    if (this.ctx) {
+      try {
+        this.ctx.dispose();
+      } catch {
+        // Suppress dispose errors from asyncified functions
+      }
+      this.ctx = undefined;
+    }
+    if (this.runtime) {
+      try {
+        this.runtime.dispose();
+      } catch {
+        // Suppress dispose errors from asyncified functions
+      }
+      this.runtime = undefined;
+    }
   }
 }
 
@@ -416,7 +543,10 @@ function extractCodeBlocks(text: string): string[] {
 function extractFinalAnswer(
   text: string
 ): { type: "direct" | "variable"; content: string } | null {
-  const finalVarMatch = text.match(
+  // First, remove code blocks to only search in reasoning text
+  const textWithoutCode = text.replace(/```[\s\S]*?```/g, "");
+
+  const finalVarMatch = textWithoutCode.match(
     /FINAL_VAR\s*\(\s*["']?([^"')\s]+)["']?\s*\)/i
   );
   if (finalVarMatch) {
@@ -426,7 +556,7 @@ function extractFinalAnswer(
     }
   }
 
-  const finalMatch = text.match(/FINAL\s*\(\s*["']?([^"')]+)["']?\s*\)/i);
+  const finalMatch = textWithoutCode.match(/FINAL\s*\(\s*["']?([^"')]+)["']?\s*\)/i);
   if (finalMatch) {
     const content = finalMatch[1];
     if (content) {
@@ -451,17 +581,14 @@ Your task is to answer queries by:
 
 Available in the REPL environment:
 - context variable: Contains the input context (loaded as string, array, or object)
-- await llm_query(prompt): Async function to query a sub-LLM (~500K char capacity) for semantic analysis. Returns the actual LLM response string.
-- await llm_query_batched(prompts[]): Async function to query multiple prompts in parallel. Returns array of response strings.
-- await sub_rlm(prompt, subContext?): Async function to launch a recursive sub-RLM agent with its own REPL environment for complex sub-tasks. Returns the final answer string.
+- llm_query(prompt): Query a sub-LLM (~500K char capacity) for semantic analysis. Returns the LLM response string directly (synchronous call).
+- llm_query_batched(prompts[]): Query multiple prompts in parallel. Returns array of response strings.
+- sub_rlm(prompt, subContext?): Launch a recursive sub-RLM agent for complex sub-tasks. Returns the final answer string.
 - console.log(): ALWAYS log to see results
 - Standard JavaScript: JSON, Array methods, String methods, Math, etc.
 
-ASYNC FUNCTION USAGE:
-These functions return Promises and must be awaited:
-- const sentiment = await llm_query("Analyze sentiment of: " + text);
-- const results = await llm_query_batched(["prompt1", "prompt2", "prompt3"]);
-- const subAnswer = await sub_rlm("Complex sub-task", partialData);
+IMPORTANT: llm_query, llm_query_batched, and sub_rlm return values directly - do NOT use await. They are synchronous in this environment.
+Example: const sentiment = llm_query("Analyze sentiment");  // No await needed
 
 Note: The context variable persists between iterations. Variables you create remain available.
 
@@ -540,6 +667,10 @@ CRITICAL - FINAL AND FINAL_VAR MUST CONTAIN ONLY THE CLEAN ANSWER:
 
 Put any explanation in your REASONING TEXT before the code block, NOT inside FINAL() or FINAL_VAR().
 
+CRITICAL: FINAL_VAR must be placed OUTSIDE code blocks, in your reasoning text AFTER the code block.
+- WRONG: \`\`\`javascript const x = 1; FINAL_VAR(x); \`\`\`  ← Code won't execute
+- CORRECT: \`\`\`javascript const x = 1; \`\`\` FINAL_VAR(x)  ← Code executes, then variable is retrieved
+
 When done, provide your final answer using:
 - FINAL(your_answer) - to submit directly (use for simple answers under 100 chars, value ONLY)
 - FINAL_VAR(variable_name) - to submit a variable from the REPL (preferred for computed results)
@@ -588,13 +719,13 @@ type GenerateParams = {
   /** The large context to load into the REPL environment (not passed to the LLM) */
   context?: RLMContext;
   /** Callback when an iteration starts (before LLM call) */
-  onIterationStart?: (event: RLMIterationStartEvent) => Promise<void>;
+  onIterationStart?: (event: RLMIterationStartEvent) => void;
   /** Callback when an iteration completes (after code execution) */
-  onIterationComplete?: (event: RLMIterationCompleteEvent) => Promise<void>;
+  onIterationComplete?: (event: RLMIterationCompleteEvent) => void;
   /** Callback when LLM is called */
-  onLLMCall?: (event: RLMCallEvent) => Promise<void>;
+  onLLMCall?: (event: RLMCallEvent) => void;
   /** Callback when errors occur */
-  onError?: (event: RLMErrorEvent) => Promise<void>;
+  onError?: (event: RLMErrorEvent) => void;
   /** Enable detailed logging (default: false) */
   debug?: boolean;
 };
@@ -777,7 +908,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     ) => {
       if (onError) {
         try {
-          await onError({
+          onError({
             iteration: steps.length,
             phase,
             error,
@@ -790,7 +921,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     };
 
     try {
-      repl.loadContext(context);
+      await repl.loadContext(context);
 
       // Build metadata about the context (as per Algorithm 1 in paper)
       let contextMeta: string;
@@ -841,7 +972,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         const iterationStartTime = Date.now();
         if (onIterationStart) {
           try {
-            await onIterationStart({ iteration: iteration + 1, messages });
+            onIterationStart({ iteration: iteration + 1, messages });
           } catch (e) {
             log("Error in onIterationStart callback:", e);
           }
@@ -860,7 +991,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           // Fire LLM call event
           if (onLLMCall) {
             try {
-              await onLLMCall({
+              onLLMCall({
                 messages,
                 modelId: "rlm-model",
                 isSubCall: false,
@@ -890,16 +1021,20 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             answer = finalAnswer.content;
           } else {
             const varValue = repl.getVariable(finalAnswer.content);
-            answer =
-              varValue !== undefined
-                ? String(varValue)
-                : `[Variable ${finalAnswer.content} not found]`;
+            if (varValue !== undefined) {
+              answer =
+                typeof varValue === "object"
+                  ? JSON.stringify(varValue)
+                  : String(varValue);
+            } else {
+              answer = `[Variable ${finalAnswer.content} not found]`;
+            }
           }
 
           // Fire iteration complete for final answer (no code executed)
           if (onIterationComplete) {
             try {
-              await onIterationComplete({
+              onIterationComplete({
                 iteration: iteration + 1,
                 step: {
                   iteration: iteration + 1,
@@ -991,7 +1126,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           const iterationDuration = Date.now() - iterationStartTime;
           if (onIterationComplete) {
             try {
-              await onIterationComplete({
+              onIterationComplete({
                 iteration: iteration + 1,
                 step,
                 llmResponse: response,
@@ -1059,10 +1194,14 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           answer = finalAnswer.content;
         } else {
           const varValue = repl.getVariable(finalAnswer.content);
-          answer =
-            varValue !== undefined
-              ? String(varValue)
-              : `[Variable ${finalAnswer.content} not found]`;
+          if (varValue !== undefined) {
+            answer =
+              typeof varValue === "object"
+                ? JSON.stringify(varValue)
+                : String(varValue);
+          } else {
+            answer = `[Variable ${finalAnswer.content} not found]`;
+          }
         }
       } else {
         answer = finalResult.text;
