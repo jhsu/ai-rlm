@@ -10,9 +10,7 @@ permissions:
   contents: write
   pull-requests: write
 
-concurrency:
-  group: "release"
-  cancel-in-progress: false
+concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   release:
@@ -32,18 +30,7 @@ jobs:
       - run: npm install -g npm@latest
       - run: npm install
 
-      - name: Check for pending changesets
-        id: check
-        run: |
-          # changeset status exits with error code 1 when no changesets found
-          if npx changeset status > /dev/null 2>&1; then
-            echo "has_changesets=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changesets=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Create Release Pull Request or Publish to npm
-        if: steps.check.outputs.has_changesets == 'true'
         id: changesets
         uses: changesets/action@v1
         with:
