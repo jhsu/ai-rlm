@@ -22,8 +22,10 @@ RLM is an inference strategy where LLMs treat long contexts as part of an extern
 ## Installation
 
 ```bash
-npm install ai-rlm @ai-sdk/openai
+npm install ai-rlm ai zod @ai-sdk/openai
 ```
+
+`ai` and `zod` are peer dependencies and must be installed in your project.
 
 The `model` and `subModel` settings accept any AI SDK `LanguageModel` — use any provider ([OpenAI](https://sdk.vercel.ai/providers/ai-sdk-providers/openai), [Anthropic](https://sdk.vercel.ai/providers/ai-sdk-providers/anthropic), [Google](https://sdk.vercel.ai/providers/ai-sdk-providers/google-generative-ai), etc.).
 
