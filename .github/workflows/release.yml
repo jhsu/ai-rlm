@@ -39,8 +39,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
           NPM_TOKEN: ""
 
+      - name: Check release readiness
+        id: ready
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if npx changeset status > /dev/null 2>&1; then
+            HAS_CHANGESETS=true
+          else
+            HAS_CHANGESETS=false
+          fi
+
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version > /dev/null 2>&1; then
+            VERSION_PUBLISHED=true
+          else
+            VERSION_PUBLISHED=false
+          fi
+
+          if [ "$HAS_CHANGESETS" = "false" ] && [ "$VERSION_PUBLISHED" = "false" ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Release
-        if: steps.changesets.outputs.hasChangesets == 'false'
+        if: steps.ready.outputs.should_release == 'true'
         run: npm publish --provenance --access public
         env:
           NPM_TOKEN: ""
