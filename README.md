@@ -1,6 +1,8 @@
-# RLM (Recursive Language Model) - TypeScript Implementation
+# ai-rlm
 
-A TypeScript implementation of the RLM (Recursive Language Model) inference strategy using the Vercel AI SDK.
+[![npm](https://img.shields.io/npm/v/ai-rlm?style=for-the-bdage)](https://www.npmjs.com/package/ai-rlm)
+
+RLM (Recursive Language Model) provided via ai-sdk Agent or tool.
 
 Based on the paper "Recursive Language Models" by Zhang, Kraska, and Khattab (2025).
 
