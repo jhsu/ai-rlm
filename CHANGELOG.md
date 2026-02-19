@@ -1,5 +1,11 @@
 # ai-rlm
 
+## 1.2.0
+
+### Minor Changes
+
+- c6189cd: switch to using quickjs for REPL
+
 ## 1.1.0
 
 ### Minor Changes
