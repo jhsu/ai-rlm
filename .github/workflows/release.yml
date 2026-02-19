@@ -34,8 +34,13 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: npm publish --provenance --access public
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
+          NPM_TOKEN: ""
+
+      - name: Release
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        run: npm publish --provenance --access public
+        env:
           NPM_TOKEN: ""
