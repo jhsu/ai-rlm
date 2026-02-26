@@ -1,6 +1,6 @@
 {
   "name": "ai-rlm",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Recursive Language Model (RLM) implementation using the Vercel AI SDK. Process long contexts through iterative code execution and sub-LLM queries.",
   "author": "Joe Hsu <jhsu.x1@gmail.com>",
   "license": "MIT",
