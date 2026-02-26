@@ -14,6 +14,11 @@ export type {
   RLMGenerateResult,
   RLMStreamResult,
   RLMContext,
+  RLMUsageSummary,
+  PrepareIterationContext,
+  PrepareIterationResult,
+  PrepareSubAgentContext,
+  PrepareSubAgentResult,
 } from "./rlm.js";
 
 // Tool exports

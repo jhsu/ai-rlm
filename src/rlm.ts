@@ -56,8 +56,65 @@ export interface RLMAgentSettings {
   maxHistoryPreview?: number;
   /** Maximum recursion depth for sub_rlm calls (default: 1, meaning sub-calls are direct LLM calls) */
   maxDepth?: number;
+  /** Optional hook to control/override each iteration before model call */
+  prepareIteration?: (
+    context: PrepareIterationContext
+  ) => MaybePromise<PrepareIterationResult | void>;
+  /** Optional hook to control recursive sub-agent behavior */
+  prepareSubAgent?: (
+    context: PrepareSubAgentContext
+  ) => MaybePromise<PrepareSubAgentResult | void>;
   /** Enable verbose logging (default: false) */
   verbose?: boolean;
+}
+
+type MaybePromise<T> = T | Promise<T>;
+
+export interface RLMUsageSummary {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reasoningTokens: number;
+  cachedInputTokens: number;
+}
+
+export interface PrepareIterationContext {
+  iteration: number;
+  maxIterations: number;
+  depth: number;
+  query: string;
+  messages: ModelMessage[];
+  llmCallCount: number;
+  maxLLMCalls: number;
+  usageSoFar: RLMUsageSummary;
+}
+
+export interface PrepareIterationResult {
+  action?: "continue" | "finalize" | "abort";
+  reason?: string;
+  finalAnswer?: string;
+  model?: LanguageModel;
+  messages?: ModelMessage[];
+  maxOutputChars?: number;
+}
+
+export interface PrepareSubAgentContext {
+  parentDepth: number;
+  nextDepth: number;
+  maxDepth: number;
+  prompt: string;
+  subContext?: RLMContext;
+  llmCallCount: number;
+  maxLLMCalls: number;
+  usageSoFar: RLMUsageSummary;
+}
+
+export interface PrepareSubAgentResult {
+  action?: "continue" | "fallback_to_llm_query" | "abort";
+  reason?: string;
+  prompt?: string;
+  subContext?: RLMContext;
+  subAgentSettings?: Partial<RLMAgentSettings>;
 }
 
 /**
@@ -72,6 +129,8 @@ export interface RLMAgentCallParameters {
   abortSignal?: AbortSignal;
   /** Optional timeout in milliseconds */
   timeout?: number;
+  /** Internal recursion depth for sub-agents */
+  currentDepth?: number;
   /** Called when iteration starts (before LLM call) */
   onIterationStart?: (event: RLMIterationStartEvent) => void;
   /** Called when iteration completes (after code execution) */
@@ -106,6 +165,8 @@ export interface RLMGenerateResult {
   llmCallCount: number;
   /** Total iterations performed */
   iterations: number;
+  /** Aggregated usage across root and sub-calls */
+  usage: RLMUsageSummary;
 
   response: GenerateTextResult<{}, any>;
 }
@@ -132,7 +193,73 @@ interface REPLEnvironmentOptions {
   currentDepth?: number;
   maxIterations?: number;
   maxOutputChars?: number;
+  prepareIteration?: (
+    context: PrepareIterationContext
+  ) => MaybePromise<PrepareIterationResult | void>;
+  prepareSubAgent?: (
+    context: PrepareSubAgentContext
+  ) => MaybePromise<PrepareSubAgentResult | void>;
   verbose?: boolean;
+}
+
+const emptyUsageSummary = (): RLMUsageSummary => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  reasoningTokens: 0,
+  cachedInputTokens: 0,
+});
+
+const toNumber = (value: unknown): number => {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : 0;
+};
+
+function usageFromGenerateResult(result: unknown): RLMUsageSummary {
+  const raw = (result as any)?.usage ?? {};
+  const inputTokens = toNumber(raw.inputTokens ?? raw.promptTokens ?? raw.prompt_tokens);
+  const outputTokens = toNumber(
+    raw.outputTokens ?? raw.completionTokens ?? raw.completion_tokens
+  );
+  const totalTokens = toNumber(raw.totalTokens ?? raw.total_tokens ?? inputTokens + outputTokens);
+  const reasoningTokens = toNumber(
+    raw.reasoningTokens ??
+      raw.reasoning_tokens ??
+      raw.completionTokensDetails?.reasoningTokens ??
+      raw.completion_tokens_details?.reasoning_tokens
+  );
+  const cachedInputTokens = toNumber(
+    raw.cachedInputTokens ??
+      raw.cached_tokens ??
+      raw.promptTokensDetails?.cachedTokens ??
+      raw.prompt_tokens_details?.cached_tokens
+  );
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    reasoningTokens,
+    cachedInputTokens,
+  };
+}
+
+function addUsage(target: RLMUsageSummary, delta: RLMUsageSummary): void {
+  target.inputTokens += delta.inputTokens;
+  target.outputTokens += delta.outputTokens;
+  target.totalTokens += delta.totalTokens;
+  target.reasoningTokens += delta.reasoningTokens;
+  target.cachedInputTokens += delta.cachedInputTokens;
+}
+
+function mergeUsage(a: RLMUsageSummary, b: RLMUsageSummary): RLMUsageSummary {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    totalTokens: a.totalTokens + b.totalTokens,
+    reasoningTokens: a.reasoningTokens + b.reasoningTokens,
+    cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+  };
 }
 
 /**
@@ -153,6 +280,13 @@ class REPLEnvironment {
   private currentDepth: number;
   private maxIterations: number;
   private maxOutputChars: number;
+  private prepareIteration?: (
+    context: PrepareIterationContext
+  ) => MaybePromise<PrepareIterationResult | void>;
+  private prepareSubAgent?: (
+    context: PrepareSubAgentContext
+  ) => MaybePromise<PrepareSubAgentResult | void>;
+  private usageSummary: RLMUsageSummary;
   private verbose: boolean;
 
   constructor(options: REPLEnvironmentOptions) {
@@ -165,6 +299,8 @@ class REPLEnvironment {
       currentDepth = 0,
       maxIterations = 20,
       maxOutputChars = 100000,
+      prepareIteration,
+      prepareSubAgent,
       verbose = false,
     } = options;
     this.llmCallCount = 0;
@@ -176,6 +312,9 @@ class REPLEnvironment {
     this.currentDepth = currentDepth;
     this.maxIterations = maxIterations;
     this.maxOutputChars = maxOutputChars;
+    this.prepareIteration = prepareIteration;
+    this.prepareSubAgent = prepareSubAgent;
+    this.usageSummary = emptyUsageSummary();
     this.verbose = verbose;
   }
 
@@ -340,6 +479,7 @@ class REPLEnvironment {
         model: this.subModel,
         prompt: prompt,
       });
+      addUsage(this.usageSummary, usageFromGenerateResult(result));
       return result.text;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -358,25 +498,71 @@ class REPLEnvironment {
     }
 
     try {
+      let nextPrompt = prompt;
+      let nextSubContext = subContext;
+      let hookSubAgentSettings: Partial<RLMAgentSettings> | undefined;
+
+      if (this.prepareSubAgent) {
+        const hookResult = await this.prepareSubAgent({
+          parentDepth: this.currentDepth,
+          nextDepth: this.currentDepth + 1,
+          maxDepth: this.maxDepth,
+          prompt,
+          subContext,
+          llmCallCount: this.llmCallCount,
+          maxLLMCalls: this.maxLLMCalls,
+          usageSoFar: { ...this.usageSummary },
+        });
+
+        if (hookResult) {
+          if (hookResult.prompt !== undefined) {
+            nextPrompt = hookResult.prompt;
+          }
+          if (hookResult.subContext !== undefined) {
+            nextSubContext = hookResult.subContext;
+          }
+          if (hookResult.subAgentSettings) {
+            hookSubAgentSettings = hookResult.subAgentSettings;
+          }
+
+          if (hookResult.action === "abort") {
+            throw new Error(hookResult.reason ?? "prepareSubAgent aborted sub-agent execution");
+          }
+
+          if (hookResult.action === "fallback_to_llm_query") {
+            return await this.llmQuery(nextPrompt);
+          }
+        }
+      }
+
       // Create a sub-RLM agent with decreased depth
-      const subAgent = new RLMAgent({
+      const defaultSubAgentSettings: RLMAgentSettings = {
         model: this.model,
         subModel: this.subModel,
         maxIterations: Math.max(5, Math.floor(this.maxIterations / 2)),
         maxLLMCalls: Math.max(10, Math.floor(this.maxLLMCalls / 2)),
         maxOutputChars: this.maxOutputChars,
-        maxDepth: this.maxDepth - 1,
+        maxDepth: this.maxDepth,
+        prepareIteration: this.prepareIteration,
+        prepareSubAgent: this.prepareSubAgent,
         verbose: this.verbose,
+      };
+
+      const subAgent = new RLMAgent({
+        ...defaultSubAgentSettings,
+        ...hookSubAgentSettings,
       });
 
       // The sub-agent inherits our call count budget
       const result = await subAgent._generate({
-        context: subContext || "No context provided",
-        query: prompt,
+        context: nextSubContext || "No context provided",
+        query: nextPrompt,
+        currentDepth: this.currentDepth + 1,
       });
 
       // Track calls used by sub-agent
       this.llmCallCount += result.llmCallCount;
+      addUsage(this.usageSummary, result.usage);
 
       return result.text;
     } catch (e) {
@@ -496,6 +682,10 @@ class REPLEnvironment {
    */
   getLLMCallCount(): number {
     return this.llmCallCount;
+  }
+
+  getUsageSummary(): RLMUsageSummary {
+    return { ...this.usageSummary };
   }
 
   /**
@@ -732,12 +922,29 @@ type GenerateParams = {
 
 interface RLMAgentOutput extends Output.Output<RLMGenerateResult, any, any> {}
 
+interface RLMAgentResolvedSettings {
+  model: LanguageModel;
+  subModel: LanguageModel;
+  maxIterations: number;
+  maxLLMCalls: number;
+  maxOutputChars: number;
+  maxHistoryPreview: number;
+  maxDepth: number;
+  prepareIteration?: (
+    context: PrepareIterationContext
+  ) => MaybePromise<PrepareIterationResult | void>;
+  prepareSubAgent?: (
+    context: PrepareSubAgentContext
+  ) => MaybePromise<PrepareSubAgentResult | void>;
+  verbose: boolean;
+}
+
 export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
   readonly version = "agent-v1" as const;
   readonly id: string;
   readonly tools: ToolSet = {};
 
-  private settings: Required<RLMAgentSettings>;
+  private settings: RLMAgentResolvedSettings;
 
   constructor(settings: RLMAgentSettings) {
     this.settings = {
@@ -748,6 +955,8 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       maxOutputChars: settings.maxOutputChars ?? 100000,
       maxHistoryPreview: settings.maxHistoryPreview ?? 500,
       maxDepth: settings.maxDepth ?? 1,
+      prepareIteration: settings.prepareIteration,
+      prepareSubAgent: settings.prepareSubAgent,
       verbose: settings.verbose ?? false,
     };
     this.id = "rlm-agent";
@@ -873,8 +1082,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     context,
     query,
     abortSignal,
-    timeout,
-    onIterationStart,
+      timeout,
+      currentDepth,
+      onIterationStart,
     onIterationComplete,
     onLLMCall,
     onError,
@@ -887,13 +1097,16 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       maxLLMCalls: this.settings.maxLLMCalls,
       timeout: timeout ?? 30000,
       maxDepth: this.settings.maxDepth,
-      currentDepth: 0,
+      currentDepth: currentDepth ?? 0,
       maxIterations: this.settings.maxIterations,
       maxOutputChars: this.settings.maxOutputChars,
+      prepareIteration: this.settings.prepareIteration,
+      prepareSubAgent: this.settings.prepareSubAgent,
       verbose: this.settings.verbose,
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
+    const rootUsageSummary = emptyUsageSummary();
 
     const log = (msg: string, ...args: unknown[]) => {
       if (debug || this.settings.verbose) {
@@ -979,14 +1192,66 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         }
 
         // Generate next action
+        let messagesForIteration = messages;
+        let modelForIteration = this.settings.model;
+        let maxOutputCharsForIteration = this.settings.maxOutputChars;
+
+        if (this.settings.prepareIteration) {
+          const prepareResult = await this.settings.prepareIteration({
+            iteration: iteration + 1,
+            maxIterations: this.settings.maxIterations,
+            depth: currentDepth ?? 0,
+            query,
+            messages,
+            llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+            maxLLMCalls: this.settings.maxLLMCalls,
+            usageSoFar: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+          });
+
+          if (prepareResult) {
+            if (prepareResult.messages) {
+              messages.length = 0;
+              messages.push(...prepareResult.messages);
+              messagesForIteration = messages;
+            }
+            if (prepareResult.model) {
+              modelForIteration = prepareResult.model;
+            }
+            if (prepareResult.maxOutputChars !== undefined) {
+              maxOutputCharsForIteration = prepareResult.maxOutputChars;
+            }
+
+            if (prepareResult.action === "finalize") {
+              return {
+                text: prepareResult.finalAnswer ?? "",
+                steps,
+                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+                iterations: iteration,
+                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+                response: {
+                  text: prepareResult.finalAnswer ?? "",
+                  usage: {},
+                  totalUsage: {},
+                  response: {},
+                } as GenerateTextResult<{}, any>,
+              };
+            }
+
+            if (prepareResult.action === "abort") {
+              throw new Error(prepareResult.reason ?? "prepareIteration aborted execution");
+            }
+          }
+        }
+
         let result;
         try {
           result = await generateText({
-            model: this.settings.model,
-            messages,
+            model: modelForIteration,
+            messages: messagesForIteration,
             abortSignal,
           });
           mainLLMCallCount++; // Track main LLM call
+          addUsage(rootUsageSummary, usageFromGenerateResult(result));
 
           // Fire LLM call event
           if (onLLMCall) {
@@ -1012,58 +1277,8 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           console.log("LLM Response:", response.substring(0, 500));
         }
 
-        // Check for final answer
-        const finalAnswer = extractFinalAnswer(response);
-        if (finalAnswer && finalAnswer.content) {
-          let answer: string;
-
-          if (finalAnswer.type === "direct") {
-            answer = finalAnswer.content;
-          } else {
-            const varValue = repl.getVariable(finalAnswer.content);
-            if (varValue !== undefined) {
-              answer =
-                typeof varValue === "object"
-                  ? JSON.stringify(varValue)
-                  : String(varValue);
-            } else {
-              answer = `[Variable ${finalAnswer.content} not found]`;
-            }
-          }
-
-          // Fire iteration complete for final answer (no code executed)
-          if (onIterationComplete) {
-            try {
-              onIterationComplete({
-                iteration: iteration + 1,
-                step: {
-                  iteration: iteration + 1,
-                  reasoning: response.substring(0, 200),
-                  code: `FINAL${
-                    finalAnswer.type === "variable" ? "_VAR" : ""
-                  }(${finalAnswer.content})`,
-                  output: `Final answer: ${answer}`,
-                },
-                llmResponse: response,
-                executionTimeMs: Date.now() - iterationStartTime,
-              });
-            } catch (e) {
-              log("Error in onIterationComplete callback for final answer:", e);
-            }
-          }
-
-          // Return RLMGenerateResult
-          return {
-            text: answer,
-            steps: steps,
-            llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-            iterations: iteration + 1,
-            response: result,
-          };
-        }
-
-        // Execute code
         const codeBlocks = extractCodeBlocks(response);
+        const finalAnswer = extractFinalAnswer(response);
 
         if (codeBlocks.length > 0 && codeBlocks[0]) {
           const code: string = codeBlocks[0];
@@ -1101,8 +1316,8 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
 
           // Truncate
           const truncatedOutput =
-            fullOutput.length > this.settings.maxOutputChars
-              ? fullOutput.substring(0, this.settings.maxOutputChars) +
+            fullOutput.length > maxOutputCharsForIteration
+              ? fullOutput.substring(0, maxOutputCharsForIteration) +
                 "\n...[truncated]"
               : fullOutput;
 
@@ -1160,7 +1375,100 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
               content: outputMeta,
             }
           );
+
+          // Finalize after code execution (supports responses that include both code and FINAL/FINAL_VAR)
+          if (finalAnswer && finalAnswer.content) {
+            let answer: string | undefined;
+
+            if (finalAnswer.type === "direct") {
+              answer = finalAnswer.content;
+            } else {
+              const varValue = repl.getVariable(finalAnswer.content);
+              if (varValue !== undefined) {
+                answer =
+                  typeof varValue === "object"
+                    ? JSON.stringify(varValue)
+                    : String(varValue);
+              }
+            }
+
+            if (answer !== undefined) {
+              return {
+                text: answer,
+                steps: steps,
+                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+                iterations: iteration + 1,
+                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+                response: result,
+              };
+            }
+
+            // Variable requested by FINAL_VAR was not created; continue loop with guidance.
+            messages.push({
+              role: "user",
+              content: `FINAL_VAR(${finalAnswer.content}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
+            });
+          }
         } else {
+          // Final answer without code block (valid when value was computed in previous iterations)
+          if (finalAnswer && finalAnswer.content) {
+            let answer: string | undefined;
+
+            if (finalAnswer.type === "direct") {
+              answer = finalAnswer.content;
+            } else {
+              const varValue = repl.getVariable(finalAnswer.content);
+              if (varValue !== undefined) {
+                answer =
+                  typeof varValue === "object"
+                    ? JSON.stringify(varValue)
+                    : String(varValue);
+              }
+            }
+
+            if (answer !== undefined) {
+              // Fire iteration complete for final answer (no code executed)
+              if (onIterationComplete) {
+                try {
+                  onIterationComplete({
+                    iteration: iteration + 1,
+                    step: {
+                      iteration: iteration + 1,
+                      reasoning: response.substring(0, 200),
+                      code: `FINAL${
+                        finalAnswer.type === "variable" ? "_VAR" : ""
+                      }(${finalAnswer.content})`,
+                      output: `Final answer: ${answer}`,
+                    },
+                    llmResponse: response,
+                    executionTimeMs: Date.now() - iterationStartTime,
+                  });
+                } catch (e) {
+                  log("Error in onIterationComplete callback for final answer:", e);
+                }
+              }
+
+              return {
+                text: answer,
+                steps: steps,
+                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+                iterations: iteration + 1,
+                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+                response: result,
+              };
+            }
+
+            messages.push({
+              role: "assistant",
+              content: response,
+            });
+            messages.push({
+              role: "user",
+              content: `FINAL_VAR(${finalAnswer.content}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
+            });
+            continue;
+          }
+
           messages.push(
             { role: "assistant", content: response },
             {
@@ -1185,6 +1493,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         abortSignal,
       });
       mainLLMCallCount++; // Track final LLM call
+      addUsage(rootUsageSummary, usageFromGenerateResult(finalResult));
 
       const finalAnswer = extractFinalAnswer(finalResult.text);
       let answer: string;
@@ -1212,6 +1521,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         steps: steps,
         llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
         iterations: this.settings.maxIterations,
+        usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
         response: finalResult,
       };
     } finally {

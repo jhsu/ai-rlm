@@ -204,6 +204,8 @@ interface RLMAgentSettings {
   maxIterations?: number;   // Max REPL iterations (default: 20)
   maxLLMCalls?: number;     // Max sub-LLM calls (default: 50)
   maxOutputChars?: number;  // Max REPL output chars (default: 100000)
+  prepareIteration?: (ctx) => PrepareIterationResult | void | Promise<PrepareIterationResult | void>;
+  prepareSubAgent?: (ctx) => PrepareSubAgentResult | void | Promise<PrepareSubAgentResult | void>;
   verbose?: boolean;        // Enable verbose logging (default: false)
 }
 ```
@@ -230,6 +232,7 @@ interface RLMGenerateResult {
   steps: REPLStep[];        // Array of REPL steps taken
   llmCallCount: number;     // Total LLM calls made
   iterations: number;       // Total iterations performed
+  usage: RLMUsageSummary;   // Aggregated token usage across root + sub-calls
 }
 
 interface REPLStep {
@@ -351,6 +354,34 @@ bun run examples/tool-usage.ts
 
 # Individual examples
 bun run -e "import { example1SimpleTextSearch } from './examples/basic-usage.ts'; example1SimpleTextSearch()"
+```
+
+## CLI Codebase Search
+
+This repo includes a local CLI script for searching a codebase with `RLMAgent`.
+
+The CLI now uses a `ToolLoopAgent` orchestrator with tools:
+- `list_files`
+- `search_files`
+- `read_file`
+- `analyze_with_rlm` (deep analysis on selected files)
+
+This avoids preloading the entire repository into one context window.
+
+```bash
+npm run code-search -- ./path/to/codebase "Where is authentication handled?"
+```
+
+You can also run the bin directly:
+
+```bash
+node ./bin/rlm-codebase-search.js ./path/to/codebase "How are API routes defined?"
+```
+
+Required environment variable:
+
+```bash
+export OPENAI_API_KEY="your_key_here"
 ```
 
 ### Example Files
