@@ -1,5 +1,11 @@
 # ai-rlm
 
+## 1.3.0
+
+### Minor Changes
+
+- c2a0f4c: add iteration/sub-agent hooks and usage summary
+
 ## 1.2.0
 
 ### Minor Changes
