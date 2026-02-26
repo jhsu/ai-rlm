@@ -64,7 +64,7 @@ jobs:
           fi
 
       - name: Release
-        if: steps.ready.outputs.should_release == 'true'
+        if: steps.ready.outputs.should_release == 'true' && github.ref == 'refs/heads/main'
         run: npm publish --provenance --access public
         env:
           NPM_TOKEN: ""
