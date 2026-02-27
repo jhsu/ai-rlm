@@ -16,6 +16,7 @@ RLM is an inference strategy where LLMs treat long contexts as part of an extern
 - **Sub-LLM Queries**: Access to `llm_query()` and `llm_query_batched()` for semantic analysis
 - **Context Management**: Efficient handling of large contexts through chunking
 - **Sandboxed REPL**: JavaScript execution in a sandboxed QuickJS WebAssembly context
+- **Pluggable Sandbox Interface**: Swap the execution environment with your own sandbox implementation
 - **AI SDK Integration**: Works as an Agent or Tool with the Vercel AI SDK
 - **Multiple Usage Patterns**: Use as standalone agent or as a tool in larger workflows
 
@@ -187,6 +188,51 @@ The JavaScript REPL runs code in a QuickJS WebAssembly sandboxed context:
 - No network access
 - Sandboxed console output capture
 
+### Custom Sandbox Implementations
+
+`RLMAgent` supports user-defined sandboxes through `sandboxFactory`.
+
+```typescript
+import {
+  RLMAgent,
+  createQuickJSSandbox,
+  type RLMSandbox,
+  type RLMSandboxFactoryOptions,
+} from 'ai-rlm';
+import { openai } from '@ai-sdk/openai';
+
+const sandboxFactory = (options: RLMSandboxFactoryOptions): RLMSandbox => {
+  // Wrap the default QuickJS sandbox, or return your own implementation.
+  return createQuickJSSandbox(options);
+};
+
+const agent = new RLMAgent({
+  model: openai('gpt-4.1'),
+  subModel: openai('gpt-4.1-mini'),
+  sandboxFactory,
+});
+```
+
+Your sandbox must implement:
+
+```typescript
+interface RLMSandbox {
+  loadContext(context: RLMContext): Promise<void>;
+  executeJavaScript(code: string): Promise<{
+    stdout: string;
+    stderr: string;
+    error?: string;
+    result?: unknown;
+  }>;
+  getVariable(name: string): unknown;
+  getLLMCallCount(): number;
+  getUsageSummary(): RLMUsageSummary;
+  cleanup(): void;
+}
+```
+
+Custom sandbox factories are also propagated to recursive `sub_rlm()` calls.
+
 ## API Reference
 
 ### RLMAgent
@@ -204,8 +250,10 @@ interface RLMAgentSettings {
   maxIterations?: number;   // Max REPL iterations (default: 20)
   maxLLMCalls?: number;     // Max sub-LLM calls (default: 50)
   maxOutputChars?: number;  // Max REPL output chars (default: 100000)
+  maxHistoryPreview?: number; // Max output preview chars in model history (default: 500)
   prepareIteration?: (ctx) => PrepareIterationResult | void | Promise<PrepareIterationResult | void>;
   prepareSubAgent?: (ctx) => PrepareSubAgentResult | void | Promise<PrepareSubAgentResult | void>;
+  sandboxFactory?: RLMSandboxFactory; // Optional custom sandbox factory
   verbose?: boolean;        // Enable verbose logging (default: false)
 }
 ```
