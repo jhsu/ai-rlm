@@ -6,7 +6,7 @@
  */
 
 // Main exports
-export { RLMAgent } from "./rlm.js";
+export { RLMAgent, createQuickJSSandbox } from "./rlm.js";
 export type {
   RLMAgentSettings,
   RLMAgentCallParameters,
@@ -19,6 +19,10 @@ export type {
   PrepareIterationResult,
   PrepareSubAgentContext,
   PrepareSubAgentResult,
+  RLMSandbox,
+  RLMSandboxExecutionResult,
+  RLMSandboxFactory,
+  RLMSandboxFactoryOptions,
 } from "./rlm.js";
 
 // Tool exports

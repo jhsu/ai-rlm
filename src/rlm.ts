@@ -66,6 +66,8 @@ export interface RLMAgentSettings {
   ) => MaybePromise<PrepareSubAgentResult | void>;
   /** Enable verbose logging (default: false) */
   verbose?: boolean;
+  /** Optional sandbox factory for custom code execution environments */
+  sandboxFactory?: RLMSandboxFactory;
 }
 
 type MaybePromise<T> = T | Promise<T>;
@@ -179,12 +181,26 @@ export interface RLMStreamResult extends RLMGenerateResult {
   textStream: ReadableStream<string>;
 }
 
-/**
- * Context can be a string, array of strings, or structured data
- */
-export type RLMContext = string | string[] | Record<string, unknown>;
+export interface RLMSandboxExecutionResult {
+  stdout: string;
+  stderr: string;
+  error?: string;
+  result?: unknown;
+}
 
-interface REPLEnvironmentOptions {
+/**
+ * Interface for sandbox implementations used by RLMAgent.
+ */
+export interface RLMSandbox {
+  loadContext(context: RLMContext): Promise<void>;
+  executeJavaScript(code: string): Promise<RLMSandboxExecutionResult>;
+  getVariable(name: string): unknown;
+  getLLMCallCount(): number;
+  getUsageSummary(): RLMUsageSummary;
+  cleanup(): void;
+}
+
+export interface RLMSandboxFactoryOptions {
   model: LanguageModel;
   subModel: LanguageModel;
   maxLLMCalls: number;
@@ -200,6 +216,20 @@ interface REPLEnvironmentOptions {
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
   verbose?: boolean;
+  sandboxFactory?: RLMSandboxFactory;
+}
+
+export type RLMSandboxFactory = (options: RLMSandboxFactoryOptions) => RLMSandbox;
+
+/**
+ * Context can be a string, array of strings, or structured data
+ */
+export type RLMContext = string | string[] | Record<string, unknown>;
+
+interface REPLEnvironmentOptions extends RLMSandboxFactoryOptions {
+  model: LanguageModel;
+  subModel: LanguageModel;
+  maxLLMCalls: number;
 }
 
 const emptyUsageSummary = (): RLMUsageSummary => ({
@@ -266,7 +296,7 @@ function mergeUsage(a: RLMUsageSummary, b: RLMUsageSummary): RLMUsageSummary {
  * Sandbox environment for executing JavaScript code safely
  * Uses QuickJS WebAssembly sandbox
  */
-class REPLEnvironment {
+class REPLEnvironment implements RLMSandbox {
   private ctx: QuickJSAsyncContext | undefined;
   private runtime: QuickJSAsyncRuntime | undefined;
   private llmCallCount: number;
@@ -288,6 +318,7 @@ class REPLEnvironment {
   ) => MaybePromise<PrepareSubAgentResult | void>;
   private usageSummary: RLMUsageSummary;
   private verbose: boolean;
+  private sandboxFactory: RLMSandboxFactory;
 
   constructor(options: REPLEnvironmentOptions) {
     const {
@@ -302,6 +333,7 @@ class REPLEnvironment {
       prepareIteration,
       prepareSubAgent,
       verbose = false,
+      sandboxFactory = createQuickJSSandbox,
     } = options;
     this.llmCallCount = 0;
     this.maxLLMCalls = maxLLMCalls;
@@ -316,6 +348,7 @@ class REPLEnvironment {
     this.prepareSubAgent = prepareSubAgent;
     this.usageSummary = emptyUsageSummary();
     this.verbose = verbose;
+    this.sandboxFactory = sandboxFactory;
   }
 
   /**
@@ -546,6 +579,7 @@ class REPLEnvironment {
         prepareIteration: this.prepareIteration,
         prepareSubAgent: this.prepareSubAgent,
         verbose: this.verbose,
+        sandboxFactory: this.sandboxFactory,
       };
 
       const subAgent = new RLMAgent({
@@ -714,6 +748,13 @@ class REPLEnvironment {
     }
   }
 }
+
+/**
+ * Default sandbox factory backed by QuickJS WebAssembly.
+ */
+export const createQuickJSSandbox: RLMSandboxFactory = (
+  options: RLMSandboxFactoryOptions
+) => new REPLEnvironment(options);
 
 function extractCodeBlocks(text: string): string[] {
   const codeBlockRegex = /```(?:javascript|js)?\s*\n([\s\S]*?)\n```/g;
@@ -937,6 +978,7 @@ interface RLMAgentResolvedSettings {
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
   verbose: boolean;
+  sandboxFactory: RLMSandboxFactory;
 }
 
 export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
@@ -958,6 +1000,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       prepareIteration: settings.prepareIteration,
       prepareSubAgent: settings.prepareSubAgent,
       verbose: settings.verbose ?? false,
+      sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
     };
     this.id = "rlm-agent";
   }
@@ -1091,7 +1134,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     debug = false,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
     const startTime = Date.now();
-    const repl = new REPLEnvironment({
+    const repl = this.settings.sandboxFactory({
       model: this.settings.model,
       subModel: this.settings.subModel,
       maxLLMCalls: this.settings.maxLLMCalls,
@@ -1103,6 +1146,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       prepareIteration: this.settings.prepareIteration,
       prepareSubAgent: this.settings.prepareSubAgent,
       verbose: this.settings.verbose,
+      sandboxFactory: this.settings.sandboxFactory,
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
