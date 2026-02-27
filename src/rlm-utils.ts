@@ -1,4 +1,4 @@
-import type { RLMUsageSummary } from "./rlm.js";
+import type { RLMUsageSummary } from "./rlm-types.js";
 
 export const emptyUsageSummary = (): RLMUsageSummary => ({
   inputTokens: 0,

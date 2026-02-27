@@ -21,6 +21,16 @@ import type {
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
 import type { RLMSandboxFactory } from "./sandbox.js";
+import type {
+  MaybePromise,
+  PrepareIterationContext,
+  PrepareIterationResult,
+  PrepareSubAgentContext,
+  PrepareSubAgentResult,
+  RLMContext,
+  RLMSubAgentSettings,
+  RLMUsageSummary,
+} from "./rlm-types.js";
 import {
   RLM_SYSTEM_PROMPT,
   addUsage,
@@ -38,6 +48,16 @@ export type {
   RLMSandboxFactory,
   RLMSandboxFactoryOptions,
 } from "./sandbox.js";
+export type {
+  MaybePromise,
+  PrepareIterationContext,
+  PrepareIterationResult,
+  PrepareSubAgentContext,
+  PrepareSubAgentResult,
+  RLMContext,
+  RLMSubAgentSettings,
+  RLMUsageSummary,
+} from "./rlm-types.js";
 
 /**
  * Settings for RLMAgent
@@ -69,55 +89,6 @@ export interface RLMAgentSettings {
   verbose?: boolean;
   /** Optional sandbox factory for custom code execution environments */
   sandboxFactory?: RLMSandboxFactory;
-}
-
-type MaybePromise<T> = T | Promise<T>;
-
-export interface RLMUsageSummary {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  reasoningTokens: number;
-  cachedInputTokens: number;
-}
-
-export interface PrepareIterationContext {
-  iteration: number;
-  maxIterations: number;
-  depth: number;
-  query: string;
-  messages: ModelMessage[];
-  llmCallCount: number;
-  maxLLMCalls: number;
-  usageSoFar: RLMUsageSummary;
-}
-
-export interface PrepareIterationResult {
-  action?: "continue" | "finalize" | "abort";
-  reason?: string;
-  finalAnswer?: string;
-  model?: LanguageModel;
-  messages?: ModelMessage[];
-  maxOutputChars?: number;
-}
-
-export interface PrepareSubAgentContext {
-  parentDepth: number;
-  nextDepth: number;
-  maxDepth: number;
-  prompt: string;
-  subContext?: RLMContext;
-  llmCallCount: number;
-  maxLLMCalls: number;
-  usageSoFar: RLMUsageSummary;
-}
-
-export interface PrepareSubAgentResult {
-  action?: "continue" | "fallback_to_llm_query" | "abort";
-  reason?: string;
-  prompt?: string;
-  subContext?: RLMContext;
-  subAgentSettings?: Partial<RLMAgentSettings>;
 }
 
 /**
@@ -181,11 +152,6 @@ export interface RLMStreamResult extends RLMGenerateResult {
   /** Readable stream of text chunks */
   textStream: ReadableStream<string>;
 }
-
-/**
- * Context can be a string, array of strings, or structured data
- */
-export type RLMContext = string | string[] | Record<string, unknown>;
 
 /**
  * Event fired when an iteration starts (before LLM is called)
@@ -424,6 +390,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       maxOutputChars: this.settings.maxOutputChars,
       prepareIteration: this.settings.prepareIteration,
       prepareSubAgent: this.settings.prepareSubAgent,
+      createSubAgent: (settings: RLMSubAgentSettings) =>
+        new RLMAgent({
+          ...settings,
+          sandboxFactory: this.settings.sandboxFactory,
+        }),
       verbose: this.settings.verbose,
       sandboxFactory: this.settings.sandboxFactory,
     });

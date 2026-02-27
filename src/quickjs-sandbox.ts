@@ -11,22 +11,21 @@ import {
   usageFromGenerateResult,
 } from "./rlm-utils.js";
 import type {
+  MaybePromise,
   PrepareIterationContext,
   PrepareIterationResult,
   PrepareSubAgentContext,
   PrepareSubAgentResult,
-  RLMAgentSettings,
+  RLMSubAgentSettings,
   RLMContext,
   RLMUsageSummary,
-} from "./rlm.js";
+} from "./rlm-types.js";
 import type {
   RLMSandbox,
   RLMSandboxExecutionResult,
   RLMSandboxFactory,
   RLMSandboxFactoryOptions,
 } from "./sandbox.js";
-
-type MaybePromise<T> = T | Promise<T>;
 
 let quickJSModule: Awaited<
   ReturnType<typeof newQuickJSAsyncWASMModuleFromVariant>
@@ -70,6 +69,7 @@ class REPLEnvironment implements RLMSandbox {
   private usageSummary: RLMUsageSummary;
   private verbose: boolean;
   private sandboxFactory: RLMSandboxFactory;
+  private createSubAgent?: RLMSandboxFactoryOptions["createSubAgent"];
 
   constructor(options: REPLEnvironmentOptions) {
     const {
@@ -100,6 +100,7 @@ class REPLEnvironment implements RLMSandbox {
     this.usageSummary = emptyUsageSummary();
     this.verbose = verbose;
     this.sandboxFactory = sandboxFactory;
+    this.createSubAgent = options.createSubAgent;
   }
 
   async loadContext(context: RLMContext): Promise<void> {
@@ -268,7 +269,7 @@ class REPLEnvironment implements RLMSandbox {
     try {
       let nextPrompt = prompt;
       let nextSubContext = subContext;
-      let hookSubAgentSettings: Partial<RLMAgentSettings> | undefined;
+      let hookSubAgentSettings: Partial<RLMSubAgentSettings> | undefined;
 
       if (this.prepareSubAgent) {
         const hookResult = await this.prepareSubAgent({
@@ -303,7 +304,7 @@ class REPLEnvironment implements RLMSandbox {
         }
       }
 
-      const defaultSubAgentSettings: RLMAgentSettings = {
+      const defaultSubAgentSettings: RLMSubAgentSettings = {
         model: this.model,
         subModel: this.subModel,
         maxIterations: Math.max(5, Math.floor(this.maxIterations / 2)),
@@ -313,11 +314,13 @@ class REPLEnvironment implements RLMSandbox {
         prepareIteration: this.prepareIteration,
         prepareSubAgent: this.prepareSubAgent,
         verbose: this.verbose,
-        sandboxFactory: this.sandboxFactory,
       };
 
-      const { RLMAgent } = await import("./rlm.js");
-      const subAgent = new RLMAgent({
+      if (!this.createSubAgent) {
+        return await this.llmQuery(nextPrompt);
+      }
+
+      const subAgent = this.createSubAgent({
         ...defaultSubAgentSettings,
         ...hookSubAgentSettings,
       });

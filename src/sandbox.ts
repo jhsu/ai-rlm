@@ -1,14 +1,15 @@
 import type { LanguageModel } from "ai";
 import type {
+  MaybePromise,
   PrepareIterationContext,
   PrepareIterationResult,
   PrepareSubAgentContext,
   PrepareSubAgentResult,
+  RLMSubAgentRunner,
+  RLMSubAgentSettings,
   RLMContext,
   RLMUsageSummary,
-} from "./rlm.js";
-
-type MaybePromise<T> = T | Promise<T>;
+} from "./rlm-types.js";
 
 export interface RLMSandboxExecutionResult {
   stdout: string;
@@ -41,6 +42,7 @@ export interface RLMSandboxFactoryOptions {
   prepareSubAgent?: (
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
+  createSubAgent?: (settings: RLMSubAgentSettings) => RLMSubAgentRunner;
   verbose?: boolean;
   sandboxFactory?: RLMSandboxFactory;
 }
