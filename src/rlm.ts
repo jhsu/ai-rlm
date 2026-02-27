@@ -19,10 +19,8 @@ import type {
   GenerateTextResult,
   StreamTextResult,
 } from "ai";
-import {
-  createQuickJSSandbox,
-  type RLMSandboxFactory,
-} from "./sandbox.js";
+import { createQuickJSSandbox } from "./quickjs-sandbox.js";
+import type { RLMSandboxFactory } from "./sandbox.js";
 import {
   RLM_SYSTEM_PROMPT,
   addUsage,
