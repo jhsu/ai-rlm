@@ -21,7 +21,7 @@ export interface RLMSandboxExecutionResult {
 export interface RLMSandbox {
   loadContext(context: RLMContext): Promise<void>;
   executeJavaScript(code: string): Promise<RLMSandboxExecutionResult>;
-  getVariable(name: string): unknown;
+  getVariable(name: string): MaybePromise<unknown>;
   getLLMCallCount(): number;
   getUsageSummary(): RLMUsageSummary;
   cleanup(): void;

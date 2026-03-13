@@ -20,6 +20,19 @@ import type {
   StreamTextResult,
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
+import {
+  extractRequestedFinalVariable,
+  resolveFinalAnswer,
+} from "./rlm-final-answer.js";
+import { normalizeGenerateInput } from "./rlm-input.js";
+import {
+  buildContextMetadata,
+  buildExecutionOutput,
+  buildOutputMetadata,
+  createInitialMessages,
+  extractReasoning,
+  truncateOutput,
+} from "./rlm-run-helpers.js";
 import type { RLMSandboxFactory } from "./sandbox.js";
 import type {
   MaybePromise,
@@ -36,7 +49,6 @@ import {
   addUsage,
   emptyUsageSummary,
   extractCodeBlocks,
-  extractFinalAnswer,
   mergeUsage,
   usageFromGenerateResult,
 } from "./rlm-utils.js";
@@ -258,67 +270,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
   async generate(
     params: AgentCallParameters<GenerateParams, {}>
   ): Promise<GenerateTextResult<{}, RLMAgentOutput>> {
-    // Extract parameters from Agent interface
-    const { prompt, messages, abortSignal, timeout, options } = params;
-    const {
-      context: explicitContext,
-      onIterationStart,
-      onIterationComplete,
-      onLLMCall,
-      onError,
-      debug,
-    } = options ?? {};
+    const { abortSignal, timeout, options } = params;
+    const { onIterationStart, onIterationComplete, onLLMCall, onError, debug } =
+      options ?? {};
+    const { context, query } = normalizeGenerateInput(params);
 
-    // Determine context and query
-    // Priority: explicit context param > system message content > fallback
-    let context: RLMContext;
-    let query: string;
-
-    if (explicitContext) {
-      // Explicit context provided via options — use prompt/last user message as query
-      context = explicitContext;
-      if (typeof prompt === "string") {
-        query = prompt;
-      } else if (messages && messages.length > 0) {
-        const lastUserMsg = messages
-          .filter((m: ModelMessage) => m.role === "user")
-          .pop();
-        query =
-          lastUserMsg && typeof lastUserMsg.content === "string"
-            ? lastUserMsg.content
-            : "Please provide a query.";
-      } else {
-        query = "Please provide a query.";
-      }
-    } else if (messages && messages.length > 0) {
-      // No explicit context — extract from messages
-      // System messages become context, last user message becomes query
-      const systemMsgs = messages.filter(
-        (m: ModelMessage) => m.role === "system"
-      );
-      if (systemMsgs.length > 0) {
-        context = systemMsgs
-          .map((m: ModelMessage) =>
-            typeof m.content === "string" ? m.content : "[complex content]"
-          )
-          .join("\n");
-      } else {
-        context = "No context provided. Answer based on the query.";
-      }
-      const lastUserMsg = messages
-        .filter((m: ModelMessage) => m.role === "user")
-        .pop();
-      query =
-        lastUserMsg && typeof lastUserMsg.content === "string"
-          ? lastUserMsg.content
-          : "Please provide a query.";
-    } else {
-      // Prompt-only fallback
-      context = "No context provided. Answer based on the query.";
-      query = typeof prompt === "string" ? prompt : "Please provide a query.";
-    }
-
-    // Call the internal implementation
     const result = await this._generate({
       context,
       query,
@@ -370,9 +326,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     context,
     query,
     abortSignal,
-      timeout,
-      currentDepth,
-      onIterationStart,
+    timeout,
+    currentDepth,
+    onIterationStart,
     onIterationComplete,
     onLLMCall,
     onError,
@@ -430,37 +386,12 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     try {
       await repl.loadContext(context);
 
-      // Build metadata about the context (as per Algorithm 1 in paper)
-      let contextMeta: string;
-      if (typeof context === "string") {
-        const preview = context.substring(0, 200);
-        contextMeta = `Type: string\nLength: ${
-          context.length
-        } characters\nPreview: "${preview}${
-          context.length > 200 ? "..." : ""
-        }"\nAccess: Use the 'context' variable to read data. Use string methods like context.substring(), context.indexOf(), context.split(), etc.`;
-      } else if (Array.isArray(context)) {
-        const preview = context.slice(0, 3).join("\n");
-        contextMeta = `Type: array\nLength: ${
-          context.length
-        } items\nPreview: [\n${preview}${
-          context.length > 3 ? "\n..." : ""
-        }\n]\nAccess: Use the 'context' variable. Access items with context[index], iterate with context.forEach() or for...of.`;
-      } else {
-        const keys = Object.keys(context);
-        const preview = keys.slice(0, 5).join(", ");
-        contextMeta = `Type: object\nKeys: ${keys.length} (${preview}${
-          keys.length > 5 ? ", ..." : ""
-        })\nAccess: Use the 'context' variable. Access properties with context.property or context["key"].`;
-      }
-
-      const messages: ModelMessage[] = [
-        { role: "system", content: RLM_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: `The input context has been loaded into the REPL environment as a variable named 'context'.\n\nContext metadata:\n${contextMeta}\n\nYour task: ${query}\n\nBegin by exploring the context to understand its structure, then write JavaScript code to analyze it and answer the query.`,
-        },
-      ];
+      const contextMeta = buildContextMetadata(context);
+      const messages: ModelMessage[] = createInitialMessages(
+        RLM_SYSTEM_PROMPT,
+        contextMeta,
+        query
+      );
 
       for (
         let iteration = 0;
@@ -532,7 +463,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             }
 
             if (prepareResult.action === "abort") {
-              throw new Error(prepareResult.reason ?? "prepareIteration aborted execution");
+              throw new Error(
+                prepareResult.reason ?? "prepareIteration aborted execution"
+              );
             }
           }
         }
@@ -572,7 +505,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         }
 
         const codeBlocks = extractCodeBlocks(response);
-        const finalAnswer = extractFinalAnswer(response);
+        const finalVariable = extractRequestedFinalVariable(response);
 
         if (codeBlocks.length > 0 && codeBlocks[0]) {
           const code: string = codeBlocks[0];
@@ -594,31 +527,12 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             };
           }
 
-          // Build full output (llm_query and sub_rlm now return values directly)
-          let fullOutput = executionResult.stdout;
-          if (
-            executionResult.result !== undefined &&
-            executionResult.result !== null
-          ) {
-            fullOutput += `\n[Return value]: ${JSON.stringify(
-              executionResult.result
-            )}`;
-          }
-          if (executionResult.error) {
-            fullOutput += `\n[Error]: ${executionResult.error}`;
-          }
-
-          // Truncate
-          const truncatedOutput =
-            fullOutput.length > maxOutputCharsForIteration
-              ? fullOutput.substring(0, maxOutputCharsForIteration) +
-                "\n...[truncated]"
-              : fullOutput;
-
-          // Get reasoning
-          const reasoningParts = response.split("```");
-          const reasoning =
-            reasoningParts.length > 0 ? (reasoningParts[0] ?? "").trim() : "";
+          const fullOutput = buildExecutionOutput(executionResult);
+          const truncatedOutput = truncateOutput(
+            fullOutput,
+            maxOutputCharsForIteration
+          );
+          const reasoning = extractReasoning(response);
 
           // Create step result
           const step: REPLStep = {
@@ -646,20 +560,12 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             }
           }
 
-          // Build constant-size metadata about stdout for LLM history
-          // Per Algorithm 1: only Metadata(stdout) is appended, not full output
-          const previewLen = this.settings.maxHistoryPreview;
-          const outputPreview = truncatedOutput.substring(0, previewLen);
-          const hasError = !!executionResult.error;
-          const outputMeta = [
-            `Output metadata:`,
-            `- Length: ${fullOutput.length} characters`,
-            `- Preview:\n${outputPreview}${
-              fullOutput.length > previewLen ? "\n..." : ""
-            }`,
-            hasError ? `- Error: ${executionResult.error}` : `- Errors: none`,
-            `\nFull output is stored in the REPL environment. Use variables to access computed results. Continue with the next step.`,
-          ].join("\n");
+          const outputMeta = buildOutputMetadata(
+            fullOutput,
+            truncatedOutput,
+            this.settings.maxHistoryPreview,
+            executionResult.error
+          );
 
           // Add to messages
           messages.push(
@@ -670,95 +576,68 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             }
           );
 
-          // Finalize after code execution (supports responses that include both code and FINAL/FINAL_VAR)
-          if (finalAnswer && finalAnswer.content) {
-            let answer: string | undefined;
+          const answer = await resolveFinalAnswer(response, repl);
+          if (answer !== undefined) {
+            return {
+              text: answer,
+              steps: steps,
+              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+              iterations: iteration + 1,
+              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              response: result,
+            };
+          }
 
-            if (finalAnswer.type === "direct") {
-              answer = finalAnswer.content;
-            } else {
-              const varValue = repl.getVariable(finalAnswer.content);
-              if (varValue !== undefined) {
-                answer =
-                  typeof varValue === "object"
-                    ? JSON.stringify(varValue)
-                    : String(varValue);
-              }
-            }
-
-            if (answer !== undefined) {
-              return {
-                text: answer,
-                steps: steps,
-                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-                iterations: iteration + 1,
-                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-                response: result,
-              };
-            }
-
-            // Variable requested by FINAL_VAR was not created; continue loop with guidance.
+          if (finalVariable) {
             messages.push({
               role: "user",
-              content: `FINAL_VAR(${finalAnswer.content}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
+              content: `FINAL_VAR(${finalVariable}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
             });
           }
         } else {
-          // Final answer without code block (valid when value was computed in previous iterations)
-          if (finalAnswer && finalAnswer.content) {
-            let answer: string | undefined;
-
-            if (finalAnswer.type === "direct") {
-              answer = finalAnswer.content;
-            } else {
-              const varValue = repl.getVariable(finalAnswer.content);
-              if (varValue !== undefined) {
-                answer =
-                  typeof varValue === "object"
-                    ? JSON.stringify(varValue)
-                    : String(varValue);
-              }
-            }
-
-            if (answer !== undefined) {
-              // Fire iteration complete for final answer (no code executed)
-              if (onIterationComplete) {
-                try {
-                  onIterationComplete({
+          const answer = await resolveFinalAnswer(response, repl);
+          if (answer !== undefined) {
+            if (onIterationComplete) {
+              try {
+                onIterationComplete({
+                  iteration: iteration + 1,
+                  step: {
                     iteration: iteration + 1,
-                    step: {
-                      iteration: iteration + 1,
-                      reasoning: response.substring(0, 200),
-                      code: `FINAL${
-                        finalAnswer.type === "variable" ? "_VAR" : ""
-                      }(${finalAnswer.content})`,
-                      output: `Final answer: ${answer}`,
-                    },
-                    llmResponse: response,
-                    executionTimeMs: Date.now() - iterationStartTime,
-                  });
-                } catch (e) {
-                  log("Error in onIterationComplete callback for final answer:", e);
-                }
+                    reasoning: response.substring(0, 200),
+                    code: finalVariable
+                      ? `FINAL_VAR(${finalVariable})`
+                      : "FINAL(...)",
+                    output: `Final answer: ${answer}`,
+                  },
+                  llmResponse: response,
+                  executionTimeMs: Date.now() - iterationStartTime,
+                });
+              } catch (e) {
+                log(
+                  "Error in onIterationComplete callback for final answer:",
+                  e
+                );
               }
-
-              return {
-                text: answer,
-                steps: steps,
-                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-                iterations: iteration + 1,
-                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-                response: result,
-              };
             }
 
+            return {
+              text: answer,
+              steps: steps,
+              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+              iterations: iteration + 1,
+              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              response: result,
+            };
+          }
+
+          if (finalVariable) {
             messages.push({
               role: "assistant",
               content: response,
             });
             messages.push({
               role: "user",
-              content: `FINAL_VAR(${finalAnswer.content}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
+              content: `FINAL_VAR(${finalVariable}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
             });
             continue;
           }
@@ -789,26 +668,12 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       mainLLMCallCount++; // Track final LLM call
       addUsage(rootUsageSummary, usageFromGenerateResult(finalResult));
 
-      const finalAnswer = extractFinalAnswer(finalResult.text);
-      let answer: string;
-
-      if (finalAnswer && finalAnswer.content) {
-        if (finalAnswer.type === "direct") {
-          answer = finalAnswer.content;
-        } else {
-          const varValue = repl.getVariable(finalAnswer.content);
-          if (varValue !== undefined) {
-            answer =
-              typeof varValue === "object"
-                ? JSON.stringify(varValue)
-                : String(varValue);
-          } else {
-            answer = `[Variable ${finalAnswer.content} not found]`;
-          }
-        }
-      } else {
-        answer = finalResult.text;
-      }
+      const finalVariableName = extractRequestedFinalVariable(finalResult.text);
+      const answer =
+        (await resolveFinalAnswer(finalResult.text, repl)) ??
+        (finalVariableName
+          ? `[Variable ${finalVariableName} not found]`
+          : finalResult.text);
 
       return {
         text: answer,
