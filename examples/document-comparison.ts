@@ -63,7 +63,6 @@ export async function documentComparisonExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 12,
     maxLLMCalls: 8,
-    verbose: false,
   });
 
   console.log("Comparing two versions of a privacy policy...\n");

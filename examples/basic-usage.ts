@@ -44,7 +44,6 @@ export async function example1SimpleTextSearch() {
     subModel,
     maxIterations: 5,
     maxLLMCalls: 3,
-    verbose: false,
   });
 
   console.log("Query:", query);
@@ -117,7 +116,6 @@ export async function example2DataAnalysis() {
     subModel,
     maxIterations: 8,
     maxLLMCalls: 5,
-    verbose: false,
   });
 
   console.log("Query:", query);
@@ -189,7 +187,8 @@ export async function example3NeedleInHaystack() {
     subModel,
     maxIterations: 15,
     maxLLMCalls: 10,
-    verbose: true, // Enable verbose to see the search strategy
+    logger: console,
+    logLevel: "debug", // Show internal agent diagnostics
   });
 
   console.log("\nQuery:", query);
@@ -271,7 +270,6 @@ export async function example4SemanticAnalysis() {
     maxIterations: 12,
     maxDepth: 10,
     maxLLMCalls: 15, // More calls needed for semantic analysis
-    verbose: false,
   });
 
   console.log("Query:", query);
@@ -360,7 +358,6 @@ export async function example5PatternExtraction() {
     subModel,
     maxIterations: 8,
     maxLLMCalls: 5,
-    verbose: false,
   });
 
   console.log("Query:", query);
@@ -425,7 +422,6 @@ export async function example6Streaming() {
     subModel,
     maxIterations: 5,
     maxLLMCalls: 3,
-    verbose: false,
   });
 
   console.log("Query:", query);

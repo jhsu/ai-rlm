@@ -213,6 +213,21 @@ const agent = new RLMAgent({
 });
 ```
 
+### Logging
+
+Library diagnostics are silent by default. If you want internal agent logs, pass an explicit logger and log level:
+
+```typescript
+const agent = new RLMAgent({
+  model: openai('gpt-4.1'),
+  subModel: openai('gpt-4.1-mini'),
+  logger: console,
+  logLevel: 'debug',
+});
+```
+
+Use this for local debugging. In application code, prefer wiring `logger` to your app's logging system rather than relying on `console`.
+
 Your sandbox must implement:
 
 ```typescript
@@ -253,8 +268,10 @@ interface RLMAgentSettings {
   maxHistoryPreview?: number; // Max output preview chars in model history (default: 500)
   prepareIteration?: (ctx) => PrepareIterationResult | void | Promise<PrepareIterationResult | void>;
   prepareSubAgent?: (ctx) => PrepareSubAgentResult | void | Promise<PrepareSubAgentResult | void>;
+  logger?: RLMLogger;       // Optional injected logger
+  logLevel?: RLMLogLevel;   // Log level for internal diagnostics (default: "silent")
+  verbose?: boolean;        // Deprecated: maps to logLevel="debug"
   sandboxFactory?: RLMSandboxFactory; // Optional custom sandbox factory
-  verbose?: boolean;        // Enable verbose logging (default: false)
 }
 ```
 
@@ -317,6 +334,8 @@ function createRLMTool(config?: {
   maxIterations?: number;   // Max iterations (default: 20)
   maxLLMCalls?: number;     // Max LLM calls (default: 50)
   maxOutputChars?: number;  // Max output chars (default: 100000)
+  logger?: RLMLogger;       // Optional injected logger
+  logLevel?: RLMLogLevel;   // Log level for internal diagnostics
 }): Tool
 ```
 

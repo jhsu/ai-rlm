@@ -46,7 +46,8 @@ async function recursiveExample() {
     maxIterations: 15,
     maxLLMCalls: 30,
     maxDepth: 3, // Enable recursive calls
-    verbose: true,
+    logger: console,
+    logLevel: "debug",
   });
 
   console.log("Query:", query);

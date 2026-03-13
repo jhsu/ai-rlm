@@ -45,7 +45,6 @@ export async function dataTransformationExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 15,
     maxLLMCalls: 8,
-    verbose: false,
   });
 
   console.log("Transforming unstructured feedback data...\n");
@@ -126,7 +125,6 @@ export async function meetingMinutesExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 10,
     maxLLMCalls: 5,
-    verbose: false,
   });
 
   console.log("Extracting structured meeting minutes...\n");

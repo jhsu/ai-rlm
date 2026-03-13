@@ -165,7 +165,6 @@ async function myExample() {
     subModel: 'gpt-4.1-mini',
     maxIterations: 10,
     maxLLMCalls: 10,
-    verbose: false,
   });
   
   // Use generate()
@@ -217,13 +216,14 @@ myToolExample();
 
 ## Tips
 
-1. **Start with `verbose: false`** for cleaner output, then enable for debugging
-2. **Adjust `maxIterations`** based on expected complexity (5-20 is typical)
-3. **Set `maxLLMCalls`** based on whether you need semantic analysis
-4. **Use structured data** (JSON) when possible for easier JavaScript processing
-5. **Test with small contexts first** before scaling to large documents
-6. **Use `stream()`** for long-running operations to get real-time feedback
-7. **Handle `abortSignal`** in production for proper cancellation support
+1. **Default to no logger** in library usage; only pass `logger: console` when you explicitly want diagnostics
+2. **Use `logLevel: "debug"`** when you want to inspect internal agent behavior
+3. **Adjust `maxIterations`** based on expected complexity (5-20 is typical)
+4. **Set `maxLLMCalls`** based on whether you need semantic analysis
+5. **Use structured data** (JSON) when possible for easier JavaScript processing
+6. **Test with small contexts first** before scaling to large documents
+7. **Use `stream()`** for long-running operations to get real-time feedback
+8. **Handle `abortSignal`** in production for proper cancellation support
 
 ## Migration from Old API
 
