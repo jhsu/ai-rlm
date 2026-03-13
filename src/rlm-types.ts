@@ -1,4 +1,5 @@
 import type { LanguageModel, ModelMessage } from "ai";
+import type { RLMLogLevel, RLMLogger } from "./logger.js";
 
 export type MaybePromise<T> = T | Promise<T>;
 
@@ -56,7 +57,8 @@ export interface RLMSubAgentSettings {
   prepareSubAgent?: (
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
-  verbose: boolean;
+  logger?: RLMLogger;
+  logLevel?: RLMLogLevel;
 }
 
 export interface PrepareSubAgentResult {

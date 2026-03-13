@@ -10,6 +10,8 @@ export { RLMAgent, createQuickJSSandbox } from "./rlm.js";
 export type {
   RLMAgentSettings,
   RLMAgentCallParameters,
+  RLMLogLevel,
+  RLMLogger,
   REPLStep,
   RLMGenerateResult,
   RLMStreamResult,

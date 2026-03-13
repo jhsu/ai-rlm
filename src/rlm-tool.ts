@@ -120,7 +120,8 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
         maxIterations: maxIterations ?? config.maxIterations ?? 20,
         maxLLMCalls: maxLLMCalls ?? config.maxLLMCalls ?? 50,
         maxOutputChars: config.maxOutputChars ?? 100000,
-        verbose: false,
+        logger: config.logger,
+        logLevel: config.logLevel,
       });
 
       const result = await agent.generate({

@@ -10,6 +10,7 @@ import {
   emptyUsageSummary,
   usageFromGenerateResult,
 } from "./rlm-utils.js";
+import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import type {
   MaybePromise,
   PrepareIterationContext,
@@ -67,7 +68,8 @@ class REPLEnvironment implements RLMSandbox {
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
   private usageSummary: RLMUsageSummary;
-  private verbose: boolean;
+  private logger?: RLMLogger;
+  private logLevel?: RLMLogLevel;
   private sandboxFactory: RLMSandboxFactory;
   private createSubAgent?: RLMSandboxFactoryOptions["createSubAgent"];
 
@@ -83,7 +85,8 @@ class REPLEnvironment implements RLMSandbox {
       maxOutputChars = 100000,
       prepareIteration,
       prepareSubAgent,
-      verbose = false,
+      logger,
+      logLevel,
       sandboxFactory = createQuickJSSandbox,
     } = options;
     this.llmCallCount = 0;
@@ -98,7 +101,8 @@ class REPLEnvironment implements RLMSandbox {
     this.prepareIteration = prepareIteration;
     this.prepareSubAgent = prepareSubAgent;
     this.usageSummary = emptyUsageSummary();
-    this.verbose = verbose;
+    this.logger = logger;
+    this.logLevel = logLevel;
     this.sandboxFactory = sandboxFactory;
     this.createSubAgent = options.createSubAgent;
   }
@@ -313,7 +317,8 @@ class REPLEnvironment implements RLMSandbox {
         maxDepth: this.maxDepth,
         prepareIteration: this.prepareIteration,
         prepareSubAgent: this.prepareSubAgent,
-        verbose: this.verbose,
+        logger: this.logger,
+        logLevel: this.logLevel,
       };
 
       if (!this.createSubAgent) {

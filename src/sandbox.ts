@@ -1,4 +1,5 @@
 import type { LanguageModel } from "ai";
+import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import type {
   MaybePromise,
   PrepareIterationContext,
@@ -43,7 +44,8 @@ export interface RLMSandboxFactoryOptions {
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
   createSubAgent?: (settings: RLMSubAgentSettings) => RLMSubAgentRunner;
-  verbose?: boolean;
+  logger?: RLMLogger;
+  logLevel?: RLMLogLevel;
   sandboxFactory?: RLMSandboxFactory;
 }
 

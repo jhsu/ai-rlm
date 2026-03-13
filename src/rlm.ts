@@ -20,6 +20,8 @@ import type {
   StreamTextResult,
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
+import { createLogger, resolveLogLevel } from "./logger.js";
+import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import {
   extractRequestedFinalVariable,
   resolveFinalAnswer,
@@ -54,6 +56,7 @@ import {
 } from "./rlm-utils.js";
 
 export { createQuickJSSandbox };
+export type { RLMLogLevel, RLMLogger } from "./logger.js";
 export type {
   RLMSandbox,
   RLMSandboxExecutionResult,
@@ -97,7 +100,11 @@ export interface RLMAgentSettings {
   prepareSubAgent?: (
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
-  /** Enable verbose logging (default: false) */
+  /** Optional injected logger for library diagnostics */
+  logger?: RLMLogger;
+  /** Log level for library diagnostics (default: silent) */
+  logLevel?: RLMLogLevel;
+  /** @deprecated Use logLevel="debug" */
   verbose?: boolean;
   /** Optional sandbox factory for custom code execution environments */
   sandboxFactory?: RLMSandboxFactory;
@@ -125,8 +132,12 @@ export interface RLMAgentCallParameters {
   onLLMCall?: (event: RLMCallEvent) => void;
   /** Called when errors occur */
   onError?: (event: RLMErrorEvent) => void;
-  /** Enable debug logging */
+  /** @deprecated Use logLevel="debug" */
   debug?: boolean;
+  /** Per-call logger override */
+  logger?: RLMLogger;
+  /** Per-call log level override */
+  logLevel?: RLMLogLevel;
 }
 
 /**
@@ -214,8 +225,12 @@ type GenerateParams = {
   onLLMCall?: (event: RLMCallEvent) => void;
   /** Callback when errors occur */
   onError?: (event: RLMErrorEvent) => void;
-  /** Enable detailed logging (default: false) */
+  /** @deprecated Use logLevel="debug" */
   debug?: boolean;
+  /** Per-call logger override */
+  logger?: RLMLogger;
+  /** Per-call log level override */
+  logLevel?: RLMLogLevel;
 };
 
 interface RLMAgentOutput extends Output.Output<RLMGenerateResult, any, any> {}
@@ -234,7 +249,8 @@ interface RLMAgentResolvedSettings {
   prepareSubAgent?: (
     context: PrepareSubAgentContext
   ) => MaybePromise<PrepareSubAgentResult | void>;
-  verbose: boolean;
+  logger?: RLMLogger;
+  logLevel: RLMLogLevel;
   sandboxFactory: RLMSandboxFactory;
 }
 
@@ -256,7 +272,8 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       maxDepth: settings.maxDepth ?? 1,
       prepareIteration: settings.prepareIteration,
       prepareSubAgent: settings.prepareSubAgent,
-      verbose: settings.verbose ?? false,
+      logger: settings.logger,
+      logLevel: resolveLogLevel(settings),
       sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
     };
     this.id = "rlm-agent";
@@ -271,8 +288,15 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     params: AgentCallParameters<GenerateParams, {}>
   ): Promise<GenerateTextResult<{}, RLMAgentOutput>> {
     const { abortSignal, timeout, options } = params;
-    const { onIterationStart, onIterationComplete, onLLMCall, onError, debug } =
-      options ?? {};
+    const {
+      onIterationStart,
+      onIterationComplete,
+      onLLMCall,
+      onError,
+      debug,
+      logger,
+      logLevel,
+    } = options ?? {};
     const { context, query } = normalizeGenerateInput(params);
 
     const result = await this._generate({
@@ -285,6 +309,8 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       onLLMCall,
       onError,
       debug,
+      logger,
+      logLevel,
     });
 
     // Return a proper GenerateTextResult that matches the Agent interface
@@ -333,8 +359,15 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     onLLMCall,
     onError,
     debug = false,
+    logger,
+    logLevel,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
     const startTime = Date.now();
+    const internalLogger = createLogger({
+      logger: logger ?? this.settings.logger,
+      logLevel: logLevel ?? this.settings.logLevel,
+      debug,
+    });
     const repl = this.settings.sandboxFactory({
       model: this.settings.model,
       subModel: this.settings.subModel,
@@ -351,18 +384,18 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           ...settings,
           sandboxFactory: this.settings.sandboxFactory,
         }),
-      verbose: this.settings.verbose,
+      logger: logger ?? this.settings.logger,
+      logLevel: logLevel ?? this.settings.logLevel,
       sandboxFactory: this.settings.sandboxFactory,
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
     const rootUsageSummary = emptyUsageSummary();
 
-    const log = (msg: string, ...args: unknown[]) => {
-      if (debug || this.settings.verbose) {
-        console.log(`[RLM ${Date.now() - startTime}ms] ${msg}`, ...args);
-      }
-    };
+    const logContext = (meta?: Record<string, unknown>) => ({
+      elapsedMs: Date.now() - startTime,
+      ...meta,
+    });
 
     const emitError = async (
       phase: RLMErrorEvent["phase"],
@@ -378,7 +411,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             context: ctx,
           });
         } catch (e) {
-          log("Error in onError callback:", e);
+          internalLogger.warn("onError callback failed", logContext({ error: e }));
         }
       }
     };
@@ -398,13 +431,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         iteration < this.settings.maxIterations;
         iteration++
       ) {
-        if (this.settings.verbose) {
-          console.log(
-            `\n=== Iteration ${iteration + 1}/${
-              this.settings.maxIterations
-            } ===`
-          );
-        }
+        internalLogger.debug("Iteration started", logContext({
+          iteration: iteration + 1,
+          maxIterations: this.settings.maxIterations,
+          depth: currentDepth ?? 0,
+        }));
 
         // Fire iteration start event
         const iterationStartTime = Date.now();
@@ -412,7 +443,10 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
           try {
             onIterationStart({ iteration: iteration + 1, messages });
           } catch (e) {
-            log("Error in onIterationStart callback:", e);
+            internalLogger.warn(
+              "onIterationStart callback failed",
+              logContext({ iteration: iteration + 1, error: e })
+            );
           }
         }
 
@@ -489,7 +523,10 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
                 isSubCall: false,
               });
             } catch (e) {
-              log("Error in onLLMCall callback:", e);
+              internalLogger.warn(
+                "onLLMCall callback failed",
+                logContext({ iteration: iteration + 1, error: e })
+              );
             }
           }
         } catch (e) {
@@ -500,9 +537,10 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
 
         const response = result.text;
 
-        if (this.settings.verbose) {
-          console.log("LLM Response:", response.substring(0, 500));
-        }
+        internalLogger.trace("LLM response received", logContext({
+          iteration: iteration + 1,
+          preview: response.substring(0, 500),
+        }));
 
         const codeBlocks = extractCodeBlocks(response);
         const finalVariable = extractRequestedFinalVariable(response);
@@ -556,7 +594,10 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
                 executionTimeMs: iterationDuration,
               });
             } catch (e) {
-              log("Error in onIterationComplete callback:", e);
+              internalLogger.warn(
+                "onIterationComplete callback failed",
+                logContext({ iteration: iteration + 1, error: e })
+              );
             }
           }
 
@@ -613,9 +654,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
                   executionTimeMs: Date.now() - iterationStartTime,
                 });
               } catch (e) {
-                log(
-                  "Error in onIterationComplete callback for final answer:",
-                  e
+                internalLogger.warn(
+                  "onIterationComplete callback failed for final answer",
+                  logContext({ iteration: iteration + 1, error: e })
                 );
               }
             }
