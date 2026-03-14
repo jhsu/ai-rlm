@@ -45,7 +45,6 @@ export async function dataTransformationExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 15,
     maxLLMCalls: 8,
-    verbose: false,
   });
 
   console.log("Transforming unstructured feedback data...\n");
@@ -53,18 +52,20 @@ export async function dataTransformationExample() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      prompt: query,
+      options: { context },
     });
+
+    const rlmData = result.output;
 
     console.log("✓ Transformation Complete!\n");
     console.log("Structured Output:\n", result.text);
-    console.log("\n✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+    console.log("\n✓ Iterations:", rlmData.iterations);
+    console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
     // Show the extraction strategy
     console.log("\n--- Extraction Steps ---");
-    result.steps.forEach((step, idx) => {
+    rlmData.steps.forEach((step, idx) => {
       if (
         step.code.includes("match") ||
         step.code.includes("split") ||
@@ -126,21 +127,22 @@ export async function meetingMinutesExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 10,
     maxLLMCalls: 5,
-    verbose: false,
   });
 
   console.log("Extracting structured meeting minutes...\n");
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      prompt: query,
+      options: { context },
     });
+
+    const rlmData = result.output;
 
     console.log("✓ Extraction Complete!\n");
     console.log("Structured Minutes:\n", result.text);
-    console.log("\n✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+    console.log("\n✓ Iterations:", rlmData.iterations);
+    console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
     return result;
   } catch (error) {

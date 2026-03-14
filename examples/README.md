@@ -14,6 +14,11 @@ bun run examples/basic-usage.ts
 bun run examples/tool-usage.ts
 ```
 
+### Run streaming example
+```bash
+bun run examples/stream-usage.ts
+```
+
 ### Run individual examples
 ```bash
 # Agent Examples
@@ -31,6 +36,7 @@ bun run -e "import { example2ToolWithAgent } from './examples/tool-usage.ts'; ex
 # Other Examples
 bun run examples/document-comparison.ts
 bun run examples/data-transformation.ts
+bun run examples/stream-usage.ts
 ```
 
 ## Examples Overview
@@ -92,12 +98,12 @@ Extracts structured data from log files using regex.
 #### Example 6: Streaming
 **Function**: `example6Streaming()`
 
-Demonstrates the `stream()` method for real-time output.
+Demonstrates the `stream()` method wrapper around `generate()`.
 
 **Key concepts**:
 - Streaming API
 - `textStream` consumption
-- Real-time result processing
+- Reading the final result from a `ReadableStream`
 
 ### Tool Examples (`tool-usage.ts`)
 
@@ -140,14 +146,24 @@ Transforms unstructured data (messy logs, notes) into structured formats.
 - JSON/CSV transformation
 - Meeting minutes extraction
 
+### Streaming (`stream-usage.ts`)
+
+Consumes both `fullStream` and `textStream` from `RLMAgent.stream()`.
+
+**Key concepts**:
+- AI SDK `TextStreamPart` events
+- `start-step` / `finish-step` progress markers
+- `textStream` consumption for final text
+- Accessing the final structured result via `streamResult.output`
+
 ## Example Output
 
 Each example prints:
 - ✓ The query being asked
 - ✓ The final answer (`result.text`)
-- ✓ Number of iterations performed (`result.iterations`)
-- ✓ Number of LLM calls made (`result.llmCallCount`)
-- ✓ Execution trajectory (`result.steps`)
+- ✓ Number of iterations performed (`result.output.iterations`)
+- ✓ Number of LLM calls made (`result.output.llmCallCount`)
+- ✓ Execution trajectory (`result.output.steps`)
 
 ## Creating Your Own Examples
 
@@ -165,21 +181,23 @@ async function myExample() {
     subModel: 'gpt-4.1-mini',
     maxIterations: 10,
     maxLLMCalls: 10,
-    verbose: false,
   });
   
   // Use generate()
   const result = await agent.generate({
-    context,
-    query,
+    prompt: query,
+    options: { context },
   });
   
   console.log('Answer:', result.text);
-  console.log('Iterations:', result.iterations);
-  console.log('LLM Calls:', result.llmCallCount);
+  console.log('Iterations:', result.output.iterations);
+  console.log('LLM Calls:', result.output.llmCallCount);
   
   // Or use stream()
-  const stream = await agent.stream({ context, query });
+  const stream = await agent.stream({
+    prompt: query,
+    options: { context },
+  });
   const reader = stream.textStream.getReader();
   while (true) {
     const { done, value } = await reader.read();
@@ -217,13 +235,14 @@ myToolExample();
 
 ## Tips
 
-1. **Start with `verbose: false`** for cleaner output, then enable for debugging
-2. **Adjust `maxIterations`** based on expected complexity (5-20 is typical)
-3. **Set `maxLLMCalls`** based on whether you need semantic analysis
-4. **Use structured data** (JSON) when possible for easier JavaScript processing
-5. **Test with small contexts first** before scaling to large documents
-6. **Use `stream()`** for long-running operations to get real-time feedback
-7. **Handle `abortSignal`** in production for proper cancellation support
+1. **Default to no logger** in library usage; only pass `logger: console` when you explicitly want diagnostics
+2. **Use `logLevel: "debug"`** when you want to inspect internal agent behavior
+3. **Adjust `maxIterations`** based on expected complexity (5-20 is typical)
+4. **Set `maxLLMCalls`** based on whether you need semantic analysis
+5. **Use structured data** (JSON) when possible for easier JavaScript processing
+6. **Test with small contexts first** before scaling to large documents
+7. **Use `stream()`** when a `ReadableStream` wrapper around the final text is more convenient than `generate()`
+8. **Handle `abortSignal`** in production for proper cancellation support
 
 ## Migration from Old API
 
@@ -238,7 +257,10 @@ const result = await rlm.completion(context, query);
 // AFTER (new API):
 import { RLMAgent } from '../src/rlm';
 const agent = new RLMAgent({ model: 'gpt-4.1' });
-const result = await agent.generate({ context, query });
+const result = await agent.generate({
+  prompt: query,
+  options: { context },
+});
 ```
 
 ## See Also

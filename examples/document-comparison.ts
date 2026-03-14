@@ -63,25 +63,26 @@ export async function documentComparisonExample() {
     subModel: "gpt-4.1-mini",
     maxIterations: 12,
     maxLLMCalls: 8,
-    verbose: false,
   });
 
   console.log("Comparing two versions of a privacy policy...\n");
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      prompt: query,
+      options: { context },
     });
+
+    const rlmData = result.output;
 
     console.log("✓ Comparison Complete!\n");
     console.log("Answer:\n", result.text);
-    console.log("\n✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+    console.log("\n✓ Iterations:", rlmData.iterations);
+    console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
     // Show the strategy used
     console.log("\n--- Comparison Strategy ---");
-    result.steps.forEach((step) => {
+    rlmData.steps.forEach((step) => {
       console.log(`\nStep ${step.iteration}:`);
       if (step.code.includes("version1") || step.code.includes("version2")) {
         console.log("Processing code:", step.code.substring(0, 100) + "...");

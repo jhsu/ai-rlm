@@ -54,6 +54,8 @@ export interface RLMToolConfig extends Partial<RLMAgentSettings> {
  * ```
  */
 export function createRLMTool(config: RLMToolConfig = {}) {
+  const model = config.model;
+
   return tool({
     description: `Analyze large contexts iteratively using JavaScript code execution.
 
@@ -105,24 +107,22 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
       { context, query, maxIterations, maxLLMCalls },
       { abortSignal }
     ) => {
+      if (!model) {
+        throw new Error(
+          "createRLMTool requires a model. Pass { model } in the tool config."
+        );
+      }
+
       // Create RLMAgent with merged config
       const agent = new RLMAgent({
-        model: config.model!,
+        model,
         subModel: config.subModel,
         maxIterations: maxIterations ?? config.maxIterations ?? 20,
         maxLLMCalls: maxLLMCalls ?? config.maxLLMCalls ?? 50,
         maxOutputChars: config.maxOutputChars ?? 100000,
-        verbose: false,
+        logger: config.logger,
+        logLevel: config.logLevel,
       });
-
-      // Execute the analysis
-      // Convert context to string if needed
-      const contextStr =
-        typeof context === "string"
-          ? context
-          : Array.isArray(context)
-          ? context.join("\n")
-          : JSON.stringify(context, null, 2);
 
       const result = await agent.generate({
         prompt: query,
