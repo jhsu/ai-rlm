@@ -36,21 +36,11 @@ type LogMethod = Exclude<RLMLogLevel, "silent">;
 export interface LoggerOptions {
   logger?: RLMLogger;
   logLevel?: RLMLogLevel;
-  verbose?: boolean;
-  debug?: boolean;
 }
 
 export function resolveLogLevel(options: LoggerOptions): RLMLogLevel {
-  if (options.debug) {
-    return "debug";
-  }
-
   if (options.logLevel) {
     return options.logLevel;
-  }
-
-  if (options.verbose) {
-    return "debug";
   }
 
   return "silent";

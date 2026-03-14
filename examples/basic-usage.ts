@@ -402,7 +402,7 @@ export async function example5PatternExtraction() {
 
 /**
  * Example: Stream the generation process
- * Shows how to use the stream() method
+ * Shows how to use the stream() wrapper
  */
 export async function example6Streaming() {
   console.log("\n" + "=".repeat(60));
@@ -425,7 +425,7 @@ export async function example6Streaming() {
   });
 
   console.log("Query:", query);
-  console.log("Using stream() method...\n");
+  console.log("Using stream() wrapper...\n");
 
   try {
     const result = await agent.stream({

@@ -52,18 +52,20 @@ export async function dataTransformationExample() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      prompt: query,
+      options: { context },
     });
+
+    const rlmData = result.output;
 
     console.log("✓ Transformation Complete!\n");
     console.log("Structured Output:\n", result.text);
-    console.log("\n✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+    console.log("\n✓ Iterations:", rlmData.iterations);
+    console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
     // Show the extraction strategy
     console.log("\n--- Extraction Steps ---");
-    result.steps.forEach((step, idx) => {
+    rlmData.steps.forEach((step, idx) => {
       if (
         step.code.includes("match") ||
         step.code.includes("split") ||
@@ -131,14 +133,16 @@ export async function meetingMinutesExample() {
 
   try {
     const result = await agent.generate({
-      context,
-      query,
+      prompt: query,
+      options: { context },
     });
+
+    const rlmData = result.output;
 
     console.log("✓ Extraction Complete!\n");
     console.log("Structured Minutes:\n", result.text);
-    console.log("\n✓ Iterations:", result.iterations);
-    console.log("✓ LLM Calls:", result.llmCallCount);
+    console.log("\n✓ Iterations:", rlmData.iterations);
+    console.log("✓ LLM Calls:", rlmData.llmCallCount);
 
     return result;
   } catch (error) {

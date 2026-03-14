@@ -57,14 +57,16 @@ const context = `
 const query = 'What is the magic number?';
 
 const result = await agent.generate({
-  context,
-  query,
+  prompt: query,
+  options: { context },
 });
 
+const rlmResult = result.output;
+
 console.log('Answer:', result.text);
-console.log('Iterations:', result.iterations);
-console.log('LLM Calls:', result.llmCallCount);
-console.log('Steps:', result.steps); // Full trajectory
+console.log('Iterations:', rlmResult.iterations);
+console.log('LLM Calls:', rlmResult.llmCallCount);
+console.log('Steps:', rlmResult.steps); // Full trajectory
 ```
 
 ### As Tool
@@ -117,11 +119,11 @@ const result = await agent.generate({
 
 ```typescript
 const stream = await agent.stream({
-  context: largeDocument,
-  query: 'Analyze this',
+  prompt: 'Analyze this',
+  options: { context: largeDocument },
 });
 
-// Read from the stream
+// textStream emits the final text after generate() completes
 const reader = stream.textStream.getReader();
 while (true) {
   const { done, value } = await reader.read();
@@ -270,7 +272,6 @@ interface RLMAgentSettings {
   prepareSubAgent?: (ctx) => PrepareSubAgentResult | void | Promise<PrepareSubAgentResult | void>;
   logger?: RLMLogger;       // Optional injected logger
   logLevel?: RLMLogLevel;   // Log level for internal diagnostics (default: "silent")
-  verbose?: boolean;        // Deprecated: maps to logLevel="debug"
   sandboxFactory?: RLMSandboxFactory; // Optional custom sandbox factory
 }
 ```
@@ -310,12 +311,13 @@ interface REPLStep {
 
 #### `async stream(options): Promise<RLMStreamResult>`
 
-Stream the answer generation process.
+Run `generate()` and emit AI SDK-style stream parts for iteration progress and final text output.
 
 **Returns:**
 ```typescript
 interface RLMStreamResult extends RLMGenerateResult {
-  textStream: ReadableStream<string>;  // Readable stream of text
+  textStream: ReadableStream<string>;  // Emits text-delta content
+  fullStream: ReadableStream<TextStreamPart<ToolSet>>; // Emits start/start-step/finish-step/text/finish events
 }
 ```
 
@@ -393,8 +395,9 @@ type RLMContext = string | string[] | Record<string, unknown>;
 │                                                             │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │              stream() Method                          │  │
-│  │  - Same as generate() with streaming                  │  │
-│  │  - Returns ReadableStream for real-time output        │  │
+│  │  - Delegates to generate()                            │  │
+│  │  - Emits start-step / finish-step progress events     │  │
+│  │  - Emits text-start / text-delta / text-end / finish  │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │

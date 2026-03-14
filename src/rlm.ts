@@ -12,12 +12,17 @@ import type {
   ModelMessage,
   LanguageModel,
   ToolSet,
+  FinishReason,
   Agent,
   Output,
   AgentCallParameters,
   AgentStreamParameters,
   GenerateTextResult,
+  TextStreamPart,
   StreamTextResult,
+  LanguageModelRequestMetadata,
+  LanguageModelResponseMetadata,
+  LanguageModelUsage,
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
 import { createLogger, resolveLogLevel } from "./logger.js";
@@ -104,8 +109,6 @@ export interface RLMAgentSettings {
   logger?: RLMLogger;
   /** Log level for library diagnostics (default: silent) */
   logLevel?: RLMLogLevel;
-  /** @deprecated Use logLevel="debug" */
-  verbose?: boolean;
   /** Optional sandbox factory for custom code execution environments */
   sandboxFactory?: RLMSandboxFactory;
 }
@@ -132,8 +135,6 @@ export interface RLMAgentCallParameters {
   onLLMCall?: (event: RLMCallEvent) => void;
   /** Called when errors occur */
   onError?: (event: RLMErrorEvent) => void;
-  /** @deprecated Use logLevel="debug" */
-  debug?: boolean;
   /** Per-call logger override */
   logger?: RLMLogger;
   /** Per-call log level override */
@@ -174,6 +175,8 @@ export interface RLMGenerateResult {
 export interface RLMStreamResult extends RLMGenerateResult {
   /** Readable stream of text chunks */
   textStream: ReadableStream<string>;
+  /** Readable stream of AI SDK text stream parts */
+  fullStream: ReadableStream<TextStreamPart<ToolSet>>;
 }
 
 /**
@@ -225,8 +228,6 @@ type GenerateParams = {
   onLLMCall?: (event: RLMCallEvent) => void;
   /** Callback when errors occur */
   onError?: (event: RLMErrorEvent) => void;
-  /** @deprecated Use logLevel="debug" */
-  debug?: boolean;
   /** Per-call logger override */
   logger?: RLMLogger;
   /** Per-call log level override */
@@ -254,10 +255,12 @@ interface RLMAgentResolvedSettings {
   sandboxFactory: RLMSandboxFactory;
 }
 
-export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
+export class RLMAgent<TOOLS extends ToolSet = ToolSet>
+  implements Agent<GenerateParams, TOOLS, RLMAgentOutput>
+{
   readonly version = "agent-v1" as const;
   readonly id: string;
-  readonly tools: ToolSet = {};
+  readonly tools: TOOLS;
 
   private settings: RLMAgentResolvedSettings;
 
@@ -273,10 +276,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       prepareIteration: settings.prepareIteration,
       prepareSubAgent: settings.prepareSubAgent,
       logger: settings.logger,
-      logLevel: resolveLogLevel(settings),
+      logLevel: resolveLogLevel({ logLevel: settings.logLevel }),
       sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
     };
     this.id = "rlm-agent";
+    this.tools = {} as TOOLS;
   }
 
   /**
@@ -285,15 +289,14 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
    * Implements the Agent interface with proper typing.
    */
   async generate(
-    params: AgentCallParameters<GenerateParams, {}>
-  ): Promise<GenerateTextResult<{}, RLMAgentOutput>> {
+    params: AgentCallParameters<GenerateParams, TOOLS>
+  ): Promise<GenerateTextResult<TOOLS, RLMAgentOutput>> {
     const { abortSignal, timeout, options } = params;
     const {
       onIterationStart,
       onIterationComplete,
       onLLMCall,
       onError,
-      debug,
       logger,
       logLevel,
     } = options ?? {};
@@ -308,15 +311,11 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       onIterationComplete,
       onLLMCall,
       onError,
-      debug,
       logger,
       logLevel,
     });
 
-    // Return a proper GenerateTextResult that matches the Agent interface
-    // Using type assertion with 'as unknown as' to bypass strict type checking
-    // while ensuring runtime compatibility
-    return {
+    const generateResult: GenerateTextResult<TOOLS, RLMAgentOutput> = {
       text: result.text,
       content: [{ type: "text" as const, text: result.text }],
       reasoning: [],
@@ -336,12 +335,13 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
       steps: [],
       output: result,
       experimental_output: result,
-      // Add missing required properties for GenerateTextResult
       staticToolCalls: [],
       dynamicToolCalls: [],
       staticToolResults: [],
       dynamicToolResults: [],
     };
+
+    return generateResult;
   }
 
   /**
@@ -358,7 +358,6 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     onIterationComplete,
     onLLMCall,
     onError,
-    debug = false,
     logger,
     logLevel,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
@@ -366,7 +365,6 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
     const internalLogger = createLogger({
       logger: logger ?? this.settings.logger,
       logLevel: logLevel ?? this.settings.logLevel,
-      debug,
     });
     const repl = this.settings.sandboxFactory({
       model: this.settings.model,
@@ -411,7 +409,10 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             context: ctx,
           });
         } catch (e) {
-          internalLogger.warn("onError callback failed", logContext({ error: e }));
+          internalLogger.warn(
+            "onError callback failed",
+            logContext({ error: e })
+          );
         }
       }
     };
@@ -431,11 +432,14 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
         iteration < this.settings.maxIterations;
         iteration++
       ) {
-        internalLogger.debug("Iteration started", logContext({
-          iteration: iteration + 1,
-          maxIterations: this.settings.maxIterations,
-          depth: currentDepth ?? 0,
-        }));
+        internalLogger.debug(
+          "Iteration started",
+          logContext({
+            iteration: iteration + 1,
+            maxIterations: this.settings.maxIterations,
+            depth: currentDepth ?? 0,
+          })
+        );
 
         // Fire iteration start event
         const iterationStartTime = Date.now();
@@ -487,12 +491,9 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
                 llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
                 iterations: iteration,
                 usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-                response: {
-                  text: prepareResult.finalAnswer ?? "",
-                  usage: {},
-                  totalUsage: {},
-                  response: {},
-                } as GenerateTextResult<{}, any>,
+                response: createSyntheticGenerateTextResult(
+                  prepareResult.finalAnswer ?? ""
+                ),
               };
             }
 
@@ -519,7 +520,7 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
             try {
               onLLMCall({
                 messages,
-                modelId: "rlm-model",
+                modelId: modelForIteration.toString(),
                 isSubCall: false,
               });
             } catch (e) {
@@ -537,10 +538,13 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
 
         const response = result.text;
 
-        internalLogger.trace("LLM response received", logContext({
-          iteration: iteration + 1,
-          preview: response.substring(0, 500),
-        }));
+        internalLogger.trace(
+          "LLM response received",
+          logContext({
+            iteration: iteration + 1,
+            preview: response.substring(0, 500),
+          })
+        );
 
         const codeBlocks = extractCodeBlocks(response);
         const finalVariable = extractRequestedFinalVariable(response);
@@ -734,38 +738,270 @@ export class RLMAgent implements Agent<GenerateParams, {}, RLMAgentOutput> {
    * Each step is yielded as it's completed.
    */
   async stream(
-    options: AgentStreamParameters<GenerateParams, {}>
-  ): Promise<StreamTextResult<{}, RLMAgentOutput>> {
-    // For now, delegate to generate() and create a simple stream wrapper
-    const result = await this.generate(options as any);
+    options: AgentStreamParameters<GenerateParams, TOOLS>
+  ): Promise<StreamTextResult<TOOLS, RLMAgentOutput>> {
+    const streamState =
+      createDeferred<GenerateTextResult<TOOLS, RLMAgentOutput>>();
+    const textId = "text-1";
+    let stepIndex = 0;
 
-    // Create a simple text stream from the result
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(result.text);
-        controller.close();
+    const fullStream = new ReadableStream<TextStreamPart<TOOLS>>({
+      start: (controller) => {
+        controller.enqueue({ type: "start" });
+
+        const optionValues = options.options ?? {};
+
+        void this.generate({
+          ...options,
+          options: {
+            ...optionValues,
+            onIterationStart: (event) => {
+              stepIndex += 1;
+              controller.enqueue({
+                type: "start-step",
+                request: createStepRequestMetadata(),
+                warnings: [],
+              });
+              optionValues.onIterationStart?.(event);
+            },
+            onIterationComplete: (event) => {
+              controller.enqueue({
+                type: "finish-step",
+                response: createStepResponseMetadata(
+                  this.settings.model.toString(),
+                  event.iteration
+                ),
+                usage: createEmptyLanguageModelUsage(),
+                finishReason: "stop",
+                rawFinishReason: undefined,
+                providerMetadata: undefined,
+              });
+              optionValues.onIterationComplete?.(event);
+            },
+            onLLMCall: (event) => {
+              optionValues.onLLMCall?.(event);
+            },
+            onError: (event) => {
+              controller.enqueue({
+                type: "error",
+                error: event.error,
+              });
+              optionValues.onError?.(event);
+            },
+          },
+        })
+          .then((result) => {
+            streamState.resolve(result);
+
+            controller.enqueue({ type: "text-start", id: textId });
+            controller.enqueue({
+              type: "text-delta",
+              id: textId,
+              text: result.text,
+            });
+            controller.enqueue({ type: "text-end", id: textId });
+            controller.enqueue({
+              type: "finish",
+              finishReason: result.finishReason,
+              rawFinishReason: result.rawFinishReason,
+              totalUsage: result.totalUsage,
+            });
+            controller.close();
+          })
+          .catch((error) => {
+            streamState.reject(error);
+            controller.enqueue({
+              type: "error",
+              error,
+            });
+            controller.close();
+          });
+      },
+    });
+
+    const [fullStreamForResult, fullStreamForText] = fullStream.tee();
+    const textStream = new ReadableStream<string>({
+      async start(controller) {
+        const reader = fullStreamForText.getReader();
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              break;
+            }
+
+            if (value?.type === "text-delta") {
+              controller.enqueue(value.text);
+            }
+          }
+          controller.close();
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          reader.releaseLock();
+        }
       },
     });
 
     return {
-      textStream: stream,
-      text: result.text,
-      content: result.content,
-      reasoning: result.reasoning,
-      reasoningText: result.reasoningText,
-      files: result.files,
-      sources: result.sources,
-      toolCalls: result.toolCalls,
-      toolResults: result.toolResults,
-      finishReason: result.finishReason,
-      rawFinishReason: result.rawFinishReason,
-      usage: {},
-      providerMetadata: result.providerMetadata,
-      request: result.request,
-      response: result.response,
-      warnings: result.warnings,
-    } as unknown as StreamTextResult<{}, RLMAgentOutput>;
+      textStream: textStream,
+      fullStream: fullStreamForResult,
+      text: streamState.promise.then((result) => result.text),
+      content: streamState.promise.then((result) => result.content),
+      reasoning: streamState.promise.then((result) => result.reasoning),
+      reasoningText: streamState.promise.then((result) => result.reasoningText),
+      files: streamState.promise.then((result) => result.files),
+      sources: streamState.promise.then((result) => result.sources),
+      toolCalls: streamState.promise.then((result) => result.toolCalls),
+      staticToolCalls: streamState.promise.then(
+        (result) => result.staticToolCalls
+      ),
+      dynamicToolCalls: streamState.promise.then(
+        (result) => result.dynamicToolCalls
+      ),
+      staticToolResults: streamState.promise.then(
+        (result) => result.staticToolResults
+      ),
+      dynamicToolResults: streamState.promise.then(
+        (result) => result.dynamicToolResults
+      ),
+      toolResults: streamState.promise.then((result) => result.toolResults),
+      finishReason: streamState.promise.then((result) => result.finishReason),
+      rawFinishReason: streamState.promise.then(
+        (result) => result.rawFinishReason
+      ),
+      usage: streamState.promise.then((result) => result.usage),
+      totalUsage: streamState.promise.then((result) => result.totalUsage),
+      warnings: streamState.promise.then((result) => result.warnings),
+      steps: Promise.resolve([]),
+      request: streamState.promise.then((result) => result.request),
+      response: streamState.promise.then((result) => result.response),
+      providerMetadata: streamState.promise.then(
+        (result) => result.providerMetadata
+      ),
+      output: streamState.promise.then((result) => result.output),
+      experimental_partialOutputStream: createClosedStream<any>(),
+      partialOutputStream: createClosedStream<any>(),
+      elementStream: createClosedStream<any>(),
+      consumeStream: async () => {
+        await streamState.promise;
+      },
+      toUIMessageStream: () => {
+        throw new Error(
+          "toUIMessageStream is not implemented for RLMAgent.stream()"
+        );
+      },
+      pipeUIMessageStreamToResponse: () => {
+        throw new Error(
+          "pipeUIMessageStreamToResponse is not implemented for RLMAgent.stream()"
+        );
+      },
+      pipeTextStreamToResponse: () => {
+        throw new Error(
+          "pipeTextStreamToResponse is not implemented for RLMAgent.stream()"
+        );
+      },
+      toUIMessageStreamResponse: () => {
+        throw new Error(
+          "toUIMessageStreamResponse is not implemented for RLMAgent.stream()"
+        );
+      },
+      toTextStreamResponse: () => {
+        throw new Error(
+          "toTextStreamResponse is not implemented for RLMAgent.stream()"
+        );
+      },
+    } satisfies StreamTextResult<TOOLS, RLMAgentOutput>;
   }
 }
 
 export default RLMAgent;
+
+function createSyntheticGenerateTextResult(
+  text: string
+): GenerateTextResult<{}, any> {
+  return {
+    text,
+    content: [{ type: "text" as const, text }],
+    reasoning: [],
+    reasoningText: undefined,
+    files: [],
+    sources: [],
+    toolCalls: [],
+    toolResults: [],
+    finishReason: "stop" as const,
+    rawFinishReason: "stop",
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    providerMetadata: undefined,
+    request: {},
+    response: {
+      id: "synthetic-response",
+      timestamp: new Date(),
+      modelId: "synthetic-response",
+      messages: [],
+    },
+    warnings: undefined,
+    steps: [],
+    output: undefined as any,
+    experimental_output: undefined as any,
+    staticToolCalls: [],
+    dynamicToolCalls: [],
+    staticToolResults: [],
+    dynamicToolResults: [],
+  } as unknown as GenerateTextResult<{}, any>;
+}
+
+function createStepRequestMetadata(): LanguageModelRequestMetadata {
+  return {};
+}
+
+function createStepResponseMetadata(
+  modelId: string,
+  iteration: number
+): LanguageModelResponseMetadata {
+  return {
+    id: `rlm-step-${iteration}`,
+    timestamp: new Date(),
+    modelId,
+  };
+}
+
+function createEmptyLanguageModelUsage(): LanguageModelUsage {
+  return {
+    inputTokens: undefined,
+    inputTokenDetails: {
+      noCacheTokens: undefined,
+      cacheReadTokens: undefined,
+      cacheWriteTokens: undefined,
+    },
+    outputTokens: undefined,
+    outputTokenDetails: {
+      textTokens: undefined,
+      reasoningTokens: undefined,
+    },
+    totalTokens: undefined,
+    raw: undefined,
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
+function createClosedStream<T>(): ReadableStream<T> {
+  return new ReadableStream<T>({
+    start(controller) {
+      controller.close();
+    },
+  });
+}

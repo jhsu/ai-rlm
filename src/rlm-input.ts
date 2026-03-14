@@ -1,4 +1,4 @@
-import type { AgentCallParameters, ModelMessage } from "ai";
+import type { ModelMessage } from "ai";
 import type { RLMContext } from "./rlm-types.js";
 
 export interface NormalizedGenerateInput {
@@ -6,13 +6,16 @@ export interface NormalizedGenerateInput {
   query: string;
 }
 
+interface NormalizeGenerateInputParams {
+  prompt?: unknown;
+  messages?: ModelMessage[];
+  options?: {
+    context?: RLMContext;
+  };
+}
+
 export function normalizeGenerateInput(
-  params: AgentCallParameters<
-    {
-      context?: RLMContext;
-    },
-    {}
-  >
+  params: NormalizeGenerateInputParams
 ): NormalizedGenerateInput {
   const { prompt, messages, options } = params;
   const explicitContext = options?.context;
@@ -51,7 +54,7 @@ export function normalizeGenerateInput(
 }
 
 function extractQueryFromPromptOrMessages(
-  prompt: AgentCallParameters<{ context?: RLMContext }, {}>["prompt"],
+  prompt: unknown,
   messages: ModelMessage[] | undefined
 ): string {
   if (typeof prompt === "string") {
