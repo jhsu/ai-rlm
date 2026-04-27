@@ -1,5 +1,16 @@
 # ai-rlm
 
+## Unreleased
+
+### API Changes
+
+- `createRLMTool` accepts an optional `description` string that is appended to the tool description as additional guidance for when and how the calling model should use the RLM tool.
+- `FINAL()` and `FINAL_VAR()` returned from executed JavaScript code blocks are now respected as final answers.
+- `FINAL_VAR` guidance now consistently uses quoted variable names, e.g. `FINAL_VAR("answer")`.
+- Small string contexts are shown more completely in initial metadata previews, reducing brittle regex guesses for short examples.
+- QuickJS sandbox execution now enforces the configured timeout with an interrupt handler.
+- `llm_query_batched()` now returns an array of response strings in the sandbox rather than a JSON-encoded string.
+
 ## 2.0.0
 
 ### Major Changes

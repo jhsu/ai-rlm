@@ -95,12 +95,48 @@ export async function example2DataAnalysis() {
 
   const context = {
     sales: [
-      { month: "January", revenue: 45000, units: 450, region: "North" },
-      { month: "February", revenue: 52000, units: 520, region: "North" },
-      { month: "March", revenue: 48000, units: 480, region: "North" },
-      { month: "January", revenue: 38000, units: 380, region: "South" },
-      { month: "February", revenue: 42000, units: 420, region: "South" },
-      { month: "March", revenue: 51000, units: 510, region: "South" },
+      {
+        quarter: "Q1",
+        month: "January",
+        revenue: 45000,
+        units: 450,
+        region: "North",
+      },
+      {
+        quarter: "Q1",
+        month: "February",
+        revenue: 52000,
+        units: 520,
+        region: "North",
+      },
+      {
+        quarter: "Q1",
+        month: "March",
+        revenue: 48000,
+        units: 480,
+        region: "North",
+      },
+      {
+        quarter: "Q1",
+        month: "January",
+        revenue: 38000,
+        units: 380,
+        region: "South",
+      },
+      {
+        quarter: "Q1",
+        month: "February",
+        revenue: 42000,
+        units: 420,
+        region: "South",
+      },
+      {
+        quarter: "Q1",
+        month: "March",
+        revenue: 51000,
+        units: 510,
+        region: "South",
+      },
     ],
     targets: {
       q1: 250000,
@@ -108,8 +144,12 @@ export async function example2DataAnalysis() {
     },
   };
 
-  const query =
-    "Did we meet our Q1 revenue target? Calculate total Q1 revenue and compare.";
+  const query = [
+    "Did we meet our Q1 revenue target?",
+    "All sales rows are labeled with quarter: 'Q1'.",
+    "Sum revenue across all Q1 sales rows, compare it to targets.q1,",
+    "and return a concise sentence with the total revenue, target, difference, and whether the target was met.",
+  ].join(" ");
 
   const agent = new RLMAgent({
     model,
@@ -261,8 +301,12 @@ export async function example4SemanticAnalysis() {
     10. "Horrible customer service. Never again."
   `;
 
-  const query =
-    "Analyze customer sentiment. Categorize each review as positive, negative, or neutral, and count totals.";
+  const query = [
+    "Analyze customer sentiment. Categorize each review as positive, negative, or neutral, and count totals.",
+    "If using llm_query or llm_query_batched, instruct the sub-LLM to return exactly one lowercase word:",
+    "positive, negative, or neutral.",
+    "Normalize responses before counting by checking whether they contain positive, negative, or neutral.",
+  ].join(" ");
 
   const agent = new RLMAgent({
     model,

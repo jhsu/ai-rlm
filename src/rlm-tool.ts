@@ -24,6 +24,11 @@ export interface RLMToolConfig extends Partial<RLMAgentSettings> {
   maxLLMCalls?: number;
   /** Maximum characters in REPL output (default: 100000) */
   maxOutputChars?: number;
+  /**
+   * Additional guidance appended to the tool description to help the calling
+   * model decide when/how to use this RLM tool.
+   */
+  description?: string;
 }
 
 /**
@@ -56,8 +61,7 @@ export interface RLMToolConfig extends Partial<RLMAgentSettings> {
 export function createRLMTool(config: RLMToolConfig = {}) {
   const model = config.model;
 
-  return tool({
-    description: `Analyze large contexts iteratively using JavaScript code execution.
+  const description = `Analyze large contexts iteratively using JavaScript code execution.
 
 Use this tool when you need to:
 - Search through or analyze documents/datasets too large for direct processing
@@ -71,7 +75,12 @@ The tool will:
 3. Use sub-LLM calls for semantic understanding when needed
 4. Iterate until it finds the answer
 
-Provide the context (string, array of strings, or JSON object) and your query/question.`,
+Provide the context (string, array of strings, or JSON object) and your query/question.${
+    config.description ? `\n\nAdditional guidance:\n${config.description}` : ""
+  }`;
+
+  return tool({
+    description,
 
     inputSchema: z.object({
       context: z
@@ -120,8 +129,13 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
         maxIterations: maxIterations ?? config.maxIterations ?? 20,
         maxLLMCalls: maxLLMCalls ?? config.maxLLMCalls ?? 50,
         maxOutputChars: config.maxOutputChars ?? 100000,
+        maxHistoryPreview: config.maxHistoryPreview,
+        maxDepth: config.maxDepth,
+        prepareIteration: config.prepareIteration,
+        prepareSubAgent: config.prepareSubAgent,
         logger: config.logger,
         logLevel: config.logLevel,
+        sandboxFactory: config.sandboxFactory,
       });
 
       const result = await agent.generate({

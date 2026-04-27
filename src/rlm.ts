@@ -29,6 +29,7 @@ import { createLogger, resolveLogLevel } from "./logger.js";
 import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import {
   extractRequestedFinalVariable,
+  resolveExecutionFinalAnswer,
   resolveFinalAnswer,
 } from "./rlm-final-answer.js";
 import { normalizeGenerateInput } from "./rlm-input.js";
@@ -507,19 +508,10 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
 
         let result;
         try {
-          result = await generateText({
-            model: modelForIteration,
-            messages: messagesForIteration,
-            abortSignal,
-          });
-          mainLLMCallCount++; // Track main LLM call
-          addUsage(rootUsageSummary, usageFromGenerateResult(result));
-
-          // Fire LLM call event
           if (onLLMCall) {
             try {
               onLLMCall({
-                messages,
+                messages: messagesForIteration,
                 modelId: modelForIteration.toString(),
                 isSubCall: false,
               });
@@ -530,6 +522,14 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
               );
             }
           }
+
+          result = await generateText({
+            model: modelForIteration,
+            messages: messagesForIteration,
+            abortSignal,
+          });
+          mainLLMCallCount++; // Track main LLM call
+          addUsage(rootUsageSummary, usageFromGenerateResult(result));
         } catch (e) {
           const error = e instanceof Error ? e : new Error(String(e));
           await emitError("llm", error, "generateText failed");
@@ -603,6 +603,21 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
                 logContext({ iteration: iteration + 1, error: e })
               );
             }
+          }
+
+          const executionFinalAnswer = await resolveExecutionFinalAnswer(
+            executionResult.result,
+            repl
+          );
+          if (executionFinalAnswer !== undefined) {
+            return {
+              text: executionFinalAnswer,
+              steps: steps,
+              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
+              iterations: iteration + 1,
+              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              response: result,
+            };
           }
 
           const outputMeta = buildOutputMetadata(

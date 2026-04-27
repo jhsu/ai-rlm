@@ -4,9 +4,10 @@ import type { RLMContext } from "./rlm-types.js";
 
 export function buildContextMetadata(context: RLMContext): string {
   if (typeof context === "string") {
-    const preview = context.substring(0, 200);
+    const previewLength = context.length <= 2000 ? context.length : 500;
+    const preview = context.substring(0, previewLength);
     return `Type: string\nLength: ${context.length} characters\nPreview: "${preview}${
-      context.length > 200 ? "..." : ""
+      context.length > previewLength ? "..." : ""
     }"\nAccess: Use the 'context' variable to read data. Use string methods like context.substring(), context.indexOf(), context.split(), etc.`;
   }
 
