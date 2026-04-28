@@ -38,7 +38,7 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: npx changeset publish
+          publish: npx -p npm@latest -p @changesets/cli sh -c 'npm --version && changeset publish'
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
