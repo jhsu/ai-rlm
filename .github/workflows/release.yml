@@ -36,7 +36,7 @@ jobs:
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
-          NPM_TOKEN: ""
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Check release readiness
         id: ready
@@ -66,4 +66,4 @@ jobs:
         if: steps.ready.outputs.should_release == 'true' && github.ref == 'refs/heads/main'
         run: npm publish --provenance --access public
         env:
-          NPM_TOKEN: ""
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
