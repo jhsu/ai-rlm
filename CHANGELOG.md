@@ -1,5 +1,11 @@
 # ai-rlm
 
+## 2.1.0
+
+### Minor Changes
+
+- 9621c50: Add optional `description` guidance to `createRLMTool`, respect `FINAL()` and `FINAL_VAR()` results returned from executed JavaScript code blocks, enforce QuickJS execution timeouts, return arrays from `llm_query_batched()`, and improve small-context previews and final-answer prompting.
+
 ## Unreleased
 
 ### API Changes
