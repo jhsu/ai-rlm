@@ -29,41 +29,17 @@ jobs:
 
       - run: npm install
 
+      - name: Print tool versions
+        run: |
+          node --version
+          npm --version
+
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
         with:
+          publish: npx changeset publish
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
-          NPM_TOKEN: ""
-
-      - name: Check release readiness
-        id: ready
-        run: |
-          PACKAGE_NAME=$(node -p "require('./package.json').name")
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-
-          if npx changeset status > /dev/null 2>&1; then
-            HAS_CHANGESETS=true
-          else
-            HAS_CHANGESETS=false
-          fi
-
-          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version > /dev/null 2>&1; then
-            VERSION_PUBLISHED=true
-          else
-            VERSION_PUBLISHED=false
-          fi
-
-          if [ "$HAS_CHANGESETS" = "false" ] && [ "$VERSION_PUBLISHED" = "false" ]; then
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Release
-        if: steps.ready.outputs.should_release == 'true' && github.ref == 'refs/heads/main'
-        run: npm publish --provenance --access public
-        env:
-          NPM_TOKEN: ""
+          NPM_CONFIG_PROVENANCE: true
