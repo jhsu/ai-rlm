@@ -34,11 +34,14 @@ jobs:
           node --version
           npm --version
 
+      - name: Print latest npm version for publish
+        run: npx --package npm@latest npm --version
+
       - name: Create Release Pull Request or Publish to npm
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: npx -p npm@latest -p @changesets/cli sh -c 'npm --version && changeset publish'
+          publish: npx --package npm@latest --package @changesets/cli changeset publish
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_RELEASE_SECRET }}
