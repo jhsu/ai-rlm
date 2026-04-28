@@ -2,6 +2,7 @@ import { generateText } from "ai";
 import type { LanguageModel } from "ai";
 import {
   newQuickJSAsyncWASMModuleFromVariant,
+  shouldInterruptAfterDeadline,
   type QuickJSAsyncContext,
   type QuickJSAsyncRuntime,
 } from "quickjs-emscripten-core";
@@ -45,6 +46,29 @@ interface REPLEnvironmentOptions extends RLMSandboxFactoryOptions {
   model: LanguageModel;
   subModel: LanguageModel;
   maxLLMCalls: number;
+}
+
+function formatThrownValue(value: unknown): string {
+  if (value instanceof Error) {
+    return value.message;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const maybeError = value as { name?: unknown; message?: unknown };
+    if (typeof maybeError.message === "string") {
+      return typeof maybeError.name === "string"
+        ? `${maybeError.name}: ${maybeError.message}`
+        : maybeError.message;
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
 }
 
 class REPLEnvironment implements RLMSandbox {
@@ -182,8 +206,21 @@ class REPLEnvironment implements RLMSandbox {
       "llm_query_batched",
       async (promptsHandle) => {
         const prompts = this.ctx!.dump(promptsHandle) as string[];
+        if (
+          !Array.isArray(prompts) ||
+          !prompts.every((p) => typeof p === "string")
+        ) {
+          throw new Error("llm_query_batched expects an array of strings");
+        }
+        const remaining = this.maxLLMCalls - this.llmCallCount;
+        if (prompts.length > remaining) {
+          throw new Error(
+            `LLM call limit exceeded: batch requires ${prompts.length} calls, only ${remaining} remaining`
+          );
+        }
         const results = await Promise.all(prompts.map((p) => this.llmQuery(p)));
-        return this.ctx!.newString(JSON.stringify(results));
+        const resultHandle = this.ctx!.evalCode(`(${JSON.stringify(results)})`);
+        return this.ctx!.unwrapResult(resultHandle);
       }
     );
     this.ctx.setProp(this.ctx.global, "llm_query_batched", llmQueryBatchedFn);
@@ -211,14 +248,15 @@ class REPLEnvironment implements RLMSandbox {
     subRlmFn.dispose();
 
     const finalFn = this.ctx.newFunction("FINAL", (answerHandle) => {
-      const answer = this.ctx!.getString(answerHandle);
+      const answer = this.ctx!.dump(answerHandle);
       const obj = this.ctx!.newObject();
       const typeHandle = this.ctx!.newString("final");
       this.ctx!.setProp(obj, "type", typeHandle);
       typeHandle.dispose();
-      const valueHandle = this.ctx!.newString(answer);
-      this.ctx!.setProp(obj, "value", valueHandle);
-      valueHandle.dispose();
+      const valueHandle = this.ctx!.evalCode(`(${JSON.stringify(answer)})`);
+      const valueResult = this.ctx!.unwrapResult(valueHandle);
+      this.ctx!.setProp(obj, "value", valueResult);
+      valueResult.dispose();
       return obj;
     });
     this.ctx.setProp(this.ctx.global, "FINAL", finalFn);
@@ -299,7 +337,9 @@ class REPLEnvironment implements RLMSandbox {
           }
 
           if (hookResult.action === "abort") {
-            throw new Error(hookResult.reason ?? "prepareSubAgent aborted sub-agent execution");
+            throw new Error(
+              hookResult.reason ?? "prepareSubAgent aborted sub-agent execution"
+            );
           }
 
           if (hookResult.action === "fallback_to_llm_query") {
@@ -308,11 +348,21 @@ class REPLEnvironment implements RLMSandbox {
         }
       }
 
+      const remainingCalls = this.maxLLMCalls - this.llmCallCount;
+      if (remainingCalls <= 0) {
+        throw new Error(
+          `LLM call limit exceeded: ${this.llmCallCount}/${this.maxLLMCalls}`
+        );
+      }
+
       const defaultSubAgentSettings: RLMSubAgentSettings = {
         model: this.model,
         subModel: this.subModel,
         maxIterations: Math.max(5, Math.floor(this.maxIterations / 2)),
-        maxLLMCalls: Math.max(10, Math.floor(this.maxLLMCalls / 2)),
+        maxLLMCalls: Math.max(
+          1,
+          Math.min(remainingCalls, Math.floor(this.maxLLMCalls / 2))
+        ),
         maxOutputChars: this.maxOutputChars,
         maxDepth: this.maxDepth,
         prepareIteration: this.prepareIteration,
@@ -336,6 +386,11 @@ class REPLEnvironment implements RLMSandbox {
         currentDepth: this.currentDepth + 1,
       });
 
+      if (result.llmCallCount > remainingCalls) {
+        throw new Error(
+          `LLM call limit exceeded by sub-agent: used ${result.llmCallCount}, only ${remainingCalls} remaining`
+        );
+      }
       this.llmCallCount += result.llmCallCount;
       addUsage(this.usageSummary, result.usage);
 
@@ -357,15 +412,17 @@ class REPLEnvironment implements RLMSandbox {
     }
 
     try {
+      const deadline = Date.now() + this.timeout;
+      this.runtime?.setInterruptHandler(shouldInterruptAfterDeadline(deadline));
       const result = await this.ctx.evalCodeAsync(code);
 
       if (result.error) {
-        const errorVal = this.ctx.dump(result.error);
+        const errorMessage = formatThrownValue(this.ctx.dump(result.error));
         result.error.dispose();
         return {
           stdout: this.consoleOutput.join("\n"),
-          stderr: String(errorVal),
-          error: String(errorVal),
+          stderr: errorMessage,
+          error: errorMessage,
         };
       }
 
@@ -378,12 +435,14 @@ class REPLEnvironment implements RLMSandbox {
           const resolved = await this.ctx.resolvePromise(value);
           value.dispose();
           if (resolved.error) {
-            const errorVal = this.ctx.dump(resolved.error);
+            const errorMessage = formatThrownValue(
+              this.ctx.dump(resolved.error)
+            );
             resolved.error.dispose();
             return {
               stdout: this.consoleOutput.join("\n"),
-              stderr: String(errorVal),
-              error: String(errorVal),
+              stderr: errorMessage,
+              error: errorMessage,
             };
           }
           dumpedValue = this.ctx.dump(resolved.value);
@@ -410,12 +469,14 @@ class REPLEnvironment implements RLMSandbox {
           error: error.message,
         };
       }
-      const errorStr = String(error);
+      const errorMessage = formatThrownValue(error);
       return {
         stdout: this.consoleOutput.join("\n"),
-        stderr: errorStr,
-        error: errorStr,
+        stderr: errorMessage,
+        error: errorMessage,
       };
+    } finally {
+      this.runtime?.removeInterruptHandler();
     }
   }
 

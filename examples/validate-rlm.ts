@@ -203,7 +203,7 @@ async function runTests() {
 
     const result = await agent.generate({
       options: { context: "Data: {value: 'VAR_RESULT'}" },
-      prompt: "Extract 'value' from the data, store in variable 'extracted', then use FINAL_VAR(extracted).",
+      prompt: "Extract 'value' from the data, store in variable 'extracted', then use FINAL_VAR(\"extracted\").",
     });
 
     // Should either extract the variable or show steps were attempted
@@ -215,7 +215,7 @@ async function runTests() {
     );
     
     assert(
-      "FINAL_VAR() mechanism works (attempts variable extraction)",
+      "FINAL_VAR() mechanism works (attempts variable extraction by name)",
       hasSteps || attemptedVariableExtraction || !result.text.includes("error"),
       "Execution failed completely",
       { 

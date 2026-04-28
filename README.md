@@ -82,6 +82,8 @@ import { openai } from '@ai-sdk/openai';
 const rlmTool = createRLMTool({
   model: openai('gpt-4.1'),
   subModel: openai('gpt-4.1-mini'),
+  description:
+    'Use for repository-scale security review when the relevant files are too large to inspect directly.',
 });
 
 // Use in generateText
@@ -150,7 +152,7 @@ console.log('Found:', targetLine);
 const answer = targetLine?.match(/magic number is (\d+)/)?.[1];
 
 // Submit answer
-FINAL_VAR(answer)
+FINAL_VAR("answer")
 ```
 
 1. **Context Loading**: The context is loaded into a sandboxed JavaScript REPL environment
@@ -158,7 +160,7 @@ FINAL_VAR(answer)
 3. **Code Execution**: Code is executed in a QuickJS WebAssembly sandbox with a 30s timeout
 4. **Sub-LLM Queries**: For semantic analysis, `llm_query()` delegates to a sub-model
 5. **Result Accumulation**: The model iterates until it finds an answer
-6. **Final Answer**: The model submits an answer using `FINAL(answer)` or `FINAL_VAR(variable_name)`
+6. **Final Answer**: The model submits an answer using `FINAL(answer)` or `FINAL_VAR("variable_name")`
 
 ### System Prompt
 
@@ -180,7 +182,7 @@ The JavaScript REPL runs code in a QuickJS WebAssembly sandboxed context:
 - **`llm_query(prompt)`**: Query a sub-LLM for semantic analysis
 - **`llm_query_batched(prompts)`**: Query multiple sub-LLMs
 - **`FINAL(answer)`**: Submit final answer directly
-- **`FINAL_VAR(varName)`**: Submit a variable from the REPL
+- **`FINAL_VAR("varName")`**: Submit a variable from the REPL by name
 - **Standard JavaScript**: All ES6+ features, Array methods, String methods, Math, JSON, etc.
 
 ### Security Features:
@@ -336,6 +338,7 @@ function createRLMTool(config?: {
   maxIterations?: number;   // Max iterations (default: 20)
   maxLLMCalls?: number;     // Max LLM calls (default: 50)
   maxOutputChars?: number;  // Max output chars (default: 100000)
+  description?: string;     // Extra guidance appended to the tool description
   logger?: RLMLogger;       // Optional injected logger
   logLevel?: RLMLogLevel;   // Log level for internal diagnostics
 }): Tool
