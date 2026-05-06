@@ -7,12 +7,10 @@
  * REPL Environment: JavaScript with QuickJS sandbox (WebAssembly)
  */
 
-import { generateText } from "ai";
 import type {
   ModelMessage,
   LanguageModel,
   ToolSet,
-  FinishReason,
   Agent,
   Output,
   AgentCallParameters,
@@ -25,22 +23,9 @@ import type {
   LanguageModelUsage,
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
-import { createLogger, resolveLogLevel } from "./logger.js";
+import { resolveLogLevel } from "./logger.js";
 import type { RLMLogLevel, RLMLogger } from "./logger.js";
-import {
-  extractRequestedFinalVariable,
-  resolveExecutionFinalAnswer,
-  resolveFinalAnswer,
-} from "./rlm-final-answer.js";
 import { normalizeGenerateInput } from "./rlm-input.js";
-import {
-  buildContextMetadata,
-  buildExecutionOutput,
-  buildOutputMetadata,
-  createInitialMessages,
-  extractReasoning,
-  truncateOutput,
-} from "./rlm-run-helpers.js";
 import type { RLMSandboxFactory } from "./sandbox.js";
 import type {
   MaybePromise,
@@ -52,14 +37,7 @@ import type {
   RLMSubAgentSettings,
   RLMUsageSummary,
 } from "./rlm-types.js";
-import {
-  RLM_SYSTEM_PROMPT,
-  addUsage,
-  emptyUsageSummary,
-  extractCodeBlocks,
-  mergeUsage,
-  usageFromGenerateResult,
-} from "./rlm-utils.js";
+import { runRLMGenerate } from "./rlm-runner.js";
 
 export { createQuickJSSandbox };
 export type { RLMLogLevel, RLMLogger } from "./logger.js";
@@ -362,390 +340,27 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
     logger,
     logLevel,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
-    const startTime = Date.now();
-    const internalLogger = createLogger({
-      logger: logger ?? this.settings.logger,
-      logLevel: logLevel ?? this.settings.logLevel,
-    });
-    const repl = this.settings.sandboxFactory({
-      model: this.settings.model,
-      subModel: this.settings.subModel,
-      maxLLMCalls: this.settings.maxLLMCalls,
-      timeout: timeout ?? 30000,
-      maxDepth: this.settings.maxDepth,
-      currentDepth: currentDepth ?? 0,
-      maxIterations: this.settings.maxIterations,
-      maxOutputChars: this.settings.maxOutputChars,
-      prepareIteration: this.settings.prepareIteration,
-      prepareSubAgent: this.settings.prepareSubAgent,
+    return runRLMGenerate({
+      settings: this.settings,
+      params: {
+        context,
+        query,
+        abortSignal,
+        timeout,
+        currentDepth,
+        onIterationStart,
+        onIterationComplete,
+        onLLMCall,
+        onError,
+        logger,
+        logLevel,
+      },
       createSubAgent: (settings: RLMSubAgentSettings) =>
         new RLMAgent({
           ...settings,
           sandboxFactory: this.settings.sandboxFactory,
         }),
-      logger: logger ?? this.settings.logger,
-      logLevel: logLevel ?? this.settings.logLevel,
-      sandboxFactory: this.settings.sandboxFactory,
     });
-    const steps: REPLStep[] = [];
-    let mainLLMCallCount = 0; // Track main agent LLM calls
-    const rootUsageSummary = emptyUsageSummary();
-
-    const logContext = (meta?: Record<string, unknown>) => ({
-      elapsedMs: Date.now() - startTime,
-      ...meta,
-    });
-
-    const emitError = async (
-      phase: RLMErrorEvent["phase"],
-      error: Error,
-      ctx: string
-    ) => {
-      if (onError) {
-        try {
-          onError({
-            iteration: steps.length,
-            phase,
-            error,
-            context: ctx,
-          });
-        } catch (e) {
-          internalLogger.warn(
-            "onError callback failed",
-            logContext({ error: e })
-          );
-        }
-      }
-    };
-
-    try {
-      await repl.loadContext(context);
-
-      const contextMeta = buildContextMetadata(context);
-      const messages: ModelMessage[] = createInitialMessages(
-        RLM_SYSTEM_PROMPT,
-        contextMeta,
-        query
-      );
-
-      for (
-        let iteration = 0;
-        iteration < this.settings.maxIterations;
-        iteration++
-      ) {
-        internalLogger.debug(
-          "Iteration started",
-          logContext({
-            iteration: iteration + 1,
-            maxIterations: this.settings.maxIterations,
-            depth: currentDepth ?? 0,
-          })
-        );
-
-        // Fire iteration start event
-        const iterationStartTime = Date.now();
-        if (onIterationStart) {
-          try {
-            onIterationStart({ iteration: iteration + 1, messages });
-          } catch (e) {
-            internalLogger.warn(
-              "onIterationStart callback failed",
-              logContext({ iteration: iteration + 1, error: e })
-            );
-          }
-        }
-
-        // Generate next action
-        let messagesForIteration = messages;
-        let modelForIteration = this.settings.model;
-        let maxOutputCharsForIteration = this.settings.maxOutputChars;
-
-        if (this.settings.prepareIteration) {
-          const prepareResult = await this.settings.prepareIteration({
-            iteration: iteration + 1,
-            maxIterations: this.settings.maxIterations,
-            depth: currentDepth ?? 0,
-            query,
-            messages,
-            llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-            maxLLMCalls: this.settings.maxLLMCalls,
-            usageSoFar: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-          });
-
-          if (prepareResult) {
-            if (prepareResult.messages) {
-              messages.length = 0;
-              messages.push(...prepareResult.messages);
-              messagesForIteration = messages;
-            }
-            if (prepareResult.model) {
-              modelForIteration = prepareResult.model;
-            }
-            if (prepareResult.maxOutputChars !== undefined) {
-              maxOutputCharsForIteration = prepareResult.maxOutputChars;
-            }
-
-            if (prepareResult.action === "finalize") {
-              return {
-                text: prepareResult.finalAnswer ?? "",
-                steps,
-                llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-                iterations: iteration,
-                usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-                response: createSyntheticGenerateTextResult(
-                  prepareResult.finalAnswer ?? ""
-                ),
-              };
-            }
-
-            if (prepareResult.action === "abort") {
-              throw new Error(
-                prepareResult.reason ?? "prepareIteration aborted execution"
-              );
-            }
-          }
-        }
-
-        let result;
-        try {
-          if (onLLMCall) {
-            try {
-              onLLMCall({
-                messages: messagesForIteration,
-                modelId: modelForIteration.toString(),
-                isSubCall: false,
-              });
-            } catch (e) {
-              internalLogger.warn(
-                "onLLMCall callback failed",
-                logContext({ iteration: iteration + 1, error: e })
-              );
-            }
-          }
-
-          result = await generateText({
-            model: modelForIteration,
-            messages: messagesForIteration,
-            abortSignal,
-          });
-          mainLLMCallCount++; // Track main LLM call
-          addUsage(rootUsageSummary, usageFromGenerateResult(result));
-        } catch (e) {
-          const error = e instanceof Error ? e : new Error(String(e));
-          await emitError("llm", error, "generateText failed");
-          throw error;
-        }
-
-        const response = result.text;
-
-        internalLogger.trace(
-          "LLM response received",
-          logContext({
-            iteration: iteration + 1,
-            preview: response.substring(0, 500),
-          })
-        );
-
-        const codeBlocks = extractCodeBlocks(response);
-        const finalVariable = extractRequestedFinalVariable(response);
-
-        if (codeBlocks.length > 0 && codeBlocks[0]) {
-          const code: string = codeBlocks[0];
-          let executionResult;
-          try {
-            executionResult = await repl.executeJavaScript(code);
-          } catch (e) {
-            const error = e instanceof Error ? e : new Error(String(e));
-            await emitError(
-              "execution",
-              error,
-              `Code execution failed: ${code.substring(0, 100)}`
-            );
-            // Continue with error result
-            executionResult = {
-              stdout: "",
-              stderr: error.message,
-              error: error.message,
-            };
-          }
-
-          const fullOutput = buildExecutionOutput(executionResult);
-          const truncatedOutput = truncateOutput(
-            fullOutput,
-            maxOutputCharsForIteration
-          );
-          const reasoning = extractReasoning(response);
-
-          // Create step result
-          const step: REPLStep = {
-            iteration: iteration + 1,
-            reasoning,
-            code,
-            output: truncatedOutput,
-          };
-
-          // Add to steps array
-          steps.push(step);
-
-          // Fire iteration complete event
-          const iterationDuration = Date.now() - iterationStartTime;
-          if (onIterationComplete) {
-            try {
-              onIterationComplete({
-                iteration: iteration + 1,
-                step,
-                llmResponse: response,
-                executionTimeMs: iterationDuration,
-              });
-            } catch (e) {
-              internalLogger.warn(
-                "onIterationComplete callback failed",
-                logContext({ iteration: iteration + 1, error: e })
-              );
-            }
-          }
-
-          const executionFinalAnswer = await resolveExecutionFinalAnswer(
-            executionResult.result,
-            repl
-          );
-          if (executionFinalAnswer !== undefined) {
-            return {
-              text: executionFinalAnswer,
-              steps: steps,
-              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-              iterations: iteration + 1,
-              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-              response: result,
-            };
-          }
-
-          const outputMeta = buildOutputMetadata(
-            fullOutput,
-            truncatedOutput,
-            this.settings.maxHistoryPreview,
-            executionResult.error
-          );
-
-          // Add to messages
-          messages.push(
-            { role: "assistant", content: response },
-            {
-              role: "user",
-              content: outputMeta,
-            }
-          );
-
-          const answer = await resolveFinalAnswer(response, repl);
-          if (answer !== undefined) {
-            return {
-              text: answer,
-              steps: steps,
-              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-              iterations: iteration + 1,
-              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-              response: result,
-            };
-          }
-
-          if (finalVariable) {
-            messages.push({
-              role: "user",
-              content: `FINAL_VAR(${finalVariable}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
-            });
-          }
-        } else {
-          const answer = await resolveFinalAnswer(response, repl);
-          if (answer !== undefined) {
-            if (onIterationComplete) {
-              try {
-                onIterationComplete({
-                  iteration: iteration + 1,
-                  step: {
-                    iteration: iteration + 1,
-                    reasoning: response.substring(0, 200),
-                    code: finalVariable
-                      ? `FINAL_VAR(${finalVariable})`
-                      : "FINAL(...)",
-                    output: `Final answer: ${answer}`,
-                  },
-                  llmResponse: response,
-                  executionTimeMs: Date.now() - iterationStartTime,
-                });
-              } catch (e) {
-                internalLogger.warn(
-                  "onIterationComplete callback failed for final answer",
-                  logContext({ iteration: iteration + 1, error: e })
-                );
-              }
-            }
-
-            return {
-              text: answer,
-              steps: steps,
-              llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-              iterations: iteration + 1,
-              usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-              response: result,
-            };
-          }
-
-          if (finalVariable) {
-            messages.push({
-              role: "assistant",
-              content: response,
-            });
-            messages.push({
-              role: "user",
-              content: `FINAL_VAR(${finalVariable}) referenced a variable that does not exist in REPL state. Define the variable in a code block first, verify with console.log, then call FINAL_VAR again.`,
-            });
-            continue;
-          }
-
-          messages.push(
-            { role: "assistant", content: response },
-            {
-              role: "user",
-              content:
-                "Please write JavaScript code in a ```javascript block to explore the context and answer the query.",
-            }
-          );
-        }
-      }
-
-      // Max iterations reached
-      messages.push({
-        role: "user",
-        content:
-          "Maximum iterations reached. Based on all the information gathered, provide your final answer using FINAL(your_answer).",
-      });
-
-      const finalResult = await generateText({
-        model: this.settings.model,
-        messages,
-        abortSignal,
-      });
-      mainLLMCallCount++; // Track final LLM call
-      addUsage(rootUsageSummary, usageFromGenerateResult(finalResult));
-
-      const finalVariableName = extractRequestedFinalVariable(finalResult.text);
-      const answer =
-        (await resolveFinalAnswer(finalResult.text, repl)) ??
-        (finalVariableName
-          ? `[Variable ${finalVariableName} not found]`
-          : finalResult.text);
-
-      return {
-        text: answer,
-        steps: steps,
-        llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
-        iterations: this.settings.maxIterations,
-        usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
-        response: finalResult,
-      };
-    } finally {
-      repl.cleanup();
-    }
   }
 
   /**
@@ -932,41 +547,6 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
 }
 
 export default RLMAgent;
-
-function createSyntheticGenerateTextResult(
-  text: string
-): GenerateTextResult<{}, any> {
-  return {
-    text,
-    content: [{ type: "text" as const, text }],
-    reasoning: [],
-    reasoningText: undefined,
-    files: [],
-    sources: [],
-    toolCalls: [],
-    toolResults: [],
-    finishReason: "stop" as const,
-    rawFinishReason: "stop",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    totalUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    providerMetadata: undefined,
-    request: {},
-    response: {
-      id: "synthetic-response",
-      timestamp: new Date(),
-      modelId: "synthetic-response",
-      messages: [],
-    },
-    warnings: undefined,
-    steps: [],
-    output: undefined as any,
-    experimental_output: undefined as any,
-    staticToolCalls: [],
-    dynamicToolCalls: [],
-    staticToolResults: [],
-    dynamicToolResults: [],
-  } as unknown as GenerateTextResult<{}, any>;
-}
 
 function createStepRequestMetadata(): LanguageModelRequestMetadata {
   return {};
