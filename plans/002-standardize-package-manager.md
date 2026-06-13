@@ -2,7 +2,7 @@
 
 > **Executor instructions**: Follow this plan step by step. Run every verification command and confirm the expected result before moving to the next step. If anything in the "STOP conditions" section occurs, stop and report; do not improvise. When done, update the status row for this plan in `plans/README.md` unless a reviewer tells you they maintain the index.
 >
-> **Drift check (run first)**: `git diff --stat cdceb83..HEAD -- package.json package-lock.json pnpm-lock.yaml bun.lock pnpm-workspace.yaml .github/workflows/release.yml apps/rlm-monitor/package.json apps/rlm-monitor/README.md apps/rlm-monitor/bun.lock README.md examples/README.md site/package.json`
+> **Drift check (run first)**: `git diff --stat 12d4c7d..HEAD -- package.json package-lock.json pnpm-lock.yaml bun.lock pnpm-workspace.yaml .github/workflows/release.yml apps/rlm-monitor/package.json apps/rlm-monitor/README.md apps/rlm-monitor/bun.lock README.md examples/README.md site/package.json`
 > If any in-scope file changed since this plan was written, compare the "Current state" excerpts against the live code before proceeding. If the relevant code no longer matches, treat it as a STOP condition.
 
 ## Status
@@ -12,7 +12,7 @@
 - **Risk**: MED
 - **Depends on**: `plans/001-restore-typecheck.md`
 - **Category**: dx
-- **Planned at**: commit `cdceb83`, 2026-06-10
+- **Planned at**: commit `12d4c7d`, 2026-06-13
 
 ## Why this matters
 
@@ -22,7 +22,7 @@ The repo currently presents npm, pnpm, and Bun as possible sources of dependency
 
 Relevant files and roles:
 
-- `package.json` — root package manifest; currently has no `packageManager` field.
+- `package.json` — root package manifest; currently has no `packageManager` field and includes the Plan 001 `typecheck` scripts.
 - `package-lock.json` — npm lockfile used by the current release workflow.
 - `pnpm-lock.yaml` — pnpm lockfile present at repo root.
 - `bun.lock` — Bun lockfile present at repo root.
@@ -36,7 +36,7 @@ Relevant files and roles:
 Root package script excerpt:
 
 ```json
-package.json:53-62
+package.json:53-64
 "scripts": {
   "build": "tsc -p tsconfig.build.json",
   "build:watch": "tsc -p tsconfig.build.json --watch",
@@ -45,7 +45,9 @@ package.json:53-62
   "clean": "rm -rf dist",
   "prepublishOnly": "npm run clean && npm run build",
   "release:github": "node ./bin/create-github-release.js",
-  "test": "echo \"Error: no test specified\" && exit 1"
+  "test": "echo \"Error: no test specified\" && exit 1",
+  "typecheck": "tsc --noEmit",
+  "typecheck:monitor": "tsc -p apps/rlm-monitor/tsconfig.json"
 }
 ```
 
@@ -64,10 +66,18 @@ Release workflow excerpt:
 Workspace config currently present:
 
 ```yaml
-pnpm-workspace.yaml:1-4
+pnpm-workspace.yaml:1-9
 packages:
+  - .
   - apps/*
   - site
+
+allowBuilds:
+  '@mongodb-js/zstd': true
+  esbuild: true
+  node-liblzma: true
+  sharp: true
+  workerd: true
 ```
 
 Monitor install docs currently say:
@@ -102,7 +112,8 @@ Package manager files observed at plan time:
 - Root `pnpm-lock.yaml` exists.
 - Root `bun.lock` exists.
 - Root `pnpm-workspace.yaml` exists.
-- `apps/rlm-monitor/bun.lock` may exist if the app was installed independently; verify before editing.
+- `apps/rlm-monitor/bun.lock` exists locally at refresh time, but is ignored by `.gitignore` via `*.lock`; do not treat it as an authoritative root lockfile.
+- Local `npm --version` at refresh time was `11.13.0`.
 
 Repo conventions to match:
 
@@ -134,7 +145,7 @@ If you choose a package manager other than npm, replace the npm commands above w
 - `examples/README.md` setup/development commands if present
 - `apps/rlm-monitor/package.json`
 - `apps/rlm-monitor/README.md`
-- `apps/rlm-monitor/bun.lock` if present
+- `apps/rlm-monitor/bun.lock` if present; because it is ignored, it may be removed from the executor worktree only if monitor docs are also changed to stop using Bun
 - `site/package.json` only if needed to align workspace/package-manager scripts
 
 **Out of scope**:
@@ -179,7 +190,7 @@ If choosing npm:
 - Add `"packageManager": "npm@<version>"` near the top-level metadata in `package.json`.
 - Keep `package-lock.json` and regenerate it only with npm if needed.
 - Delete root `pnpm-lock.yaml`, root `bun.lock`, and `pnpm-workspace.yaml`.
-- Do not delete `apps/rlm-monitor/bun.lock` in this step unless you also update monitor docs to stop using Bun.
+- Do not delete `apps/rlm-monitor/bun.lock` in this step unless you also update monitor docs to stop using Bun. It is ignored and should not appear in the committed diff either way.
 
 If choosing pnpm:
 
@@ -266,7 +277,7 @@ All must hold:
 
 Stop and report back if:
 
-- The current package-manager files no longer match the current-state summary.
+- The current tracked package-manager files no longer match the current-state summary. An ignored `apps/rlm-monitor/bun.lock` may exist and is not, by itself, a STOP condition.
 - The chosen package manager requires changing package exports, source imports, or runtime code.
 - The release workflow cannot be aligned without changing publish credentials, provenance, or changeset behavior.
 - The monitor app cannot be represented cleanly under the chosen root package manager because it relies on Bun runtime APIs.

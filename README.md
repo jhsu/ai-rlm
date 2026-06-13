@@ -449,7 +449,7 @@ type RLMContext = string | string[] | Record<string, unknown>;
 
 ## Examples
 
-Run the examples:
+Root dependencies are managed with npm. The examples below use Bun as a TypeScript runtime:
 
 ```bash
 # Basic agent examples
