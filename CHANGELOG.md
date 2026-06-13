@@ -1,5 +1,11 @@
 # ai-rlm
 
+## 2.3.0
+
+### Minor Changes
+
+- 893e7e2: Add context planning metadata and guidance for large-context RLM decomposition, plus multi-document summary examples.
+
 ## 2.2.0
 
 ### Minor Changes
