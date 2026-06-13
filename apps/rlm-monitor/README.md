@@ -12,6 +12,8 @@ A terminal UI application for real-time monitoring of RLMAgent execution.
 
 ## Installation
 
+Root dependencies are managed with npm. The monitor is a Bun app, so install and run it from this directory with Bun:
+
 ```bash
 cd apps/rlm-monitor
 bun install

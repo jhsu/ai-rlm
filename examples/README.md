@@ -4,6 +4,8 @@ This folder contains practical examples demonstrating how to use the Recursive L
 
 ## Running Examples
 
+Root dependencies are managed with npm. These examples use Bun as a TypeScript runtime for direct `.ts` execution.
+
 ### Run all basic agent examples
 ```bash
 bun run examples/basic-usage.ts
