@@ -1,5 +1,15 @@
 # ai-rlm
 
+## 2.2.0
+
+### Minor Changes
+
+- 12d4c7d: Add custom RLM REPL tools, Cloudflare sandbox helpers, and related examples.
+
+### Patch Changes
+
+- c340bc0: Standardize root dependency management on npm and keep Bun scoped to examples and the monitor runtime.
+
 ## 2.1.0
 
 ### Minor Changes
