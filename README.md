@@ -171,6 +171,28 @@ The RLM system prompt instructs the model to:
 - USE llm_query FOR SEMANTICS - Code finds WHERE; LLM understands WHAT
 - CHUNK SMARTLY - Feed substantial chunks to sub-LLMs (~500K chars)
 
+### Context Planning Metadata
+
+Before the first iteration, `RLMAgent` gives the root model metadata about the loaded context without putting the full context in the prompt. This includes nested field sizes, approximate token counts, largest text fields, and guidance for when generated code should use `llm_query()`, `llm_query_batched()`, chunking, or `sub_rlm()`.
+
+You can tune the planning thresholds:
+
+```typescript
+const agent = new RLMAgent({
+  model: openai('gpt-4.1'),
+  subModel: openai('gpt-4.1-mini'),
+  maxDepth: 3,
+  contextPlanning: {
+    maxDirectLLMQueryChars: 200_000,
+    preferSubRLMChars: 500_000,
+    chunkSizeChars: 120_000,
+    chunkOverlapChars: 4_000,
+    metadataMaxDepth: 3,
+    metadataMaxEntries: 40,
+  },
+});
+```
+
 ## REPL Sandbox
 
 The JavaScript REPL runs code in a QuickJS WebAssembly sandboxed context:

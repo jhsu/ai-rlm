@@ -20,6 +20,7 @@ import type {
   PrepareSubAgentResult,
   RLMSubAgentSettings,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
@@ -108,6 +109,7 @@ class REPLEnvironment implements RLMSandbox {
   private sandboxFactory: RLMSandboxFactory;
   private createSubAgent?: RLMSandboxFactoryOptions["createSubAgent"];
   private rlmTools?: RLMToolSet;
+  private contextPlanning?: RLMContextPlanningSettings;
 
   constructor(options: REPLEnvironmentOptions) {
     const {
@@ -125,6 +127,7 @@ class REPLEnvironment implements RLMSandbox {
       logLevel,
       sandboxFactory = createQuickJSSandbox,
       rlmTools,
+      contextPlanning,
     } = options;
     assertValidToolNames(rlmTools);
     this.llmCallCount = 0;
@@ -144,6 +147,7 @@ class REPLEnvironment implements RLMSandbox {
     this.sandboxFactory = sandboxFactory;
     this.createSubAgent = options.createSubAgent;
     this.rlmTools = rlmTools;
+    this.contextPlanning = contextPlanning;
   }
 
   async loadContext(context: RLMContext): Promise<void> {
@@ -399,6 +403,7 @@ class REPLEnvironment implements RLMSandbox {
         logger: this.logger,
         logLevel: this.logLevel,
         rlmTools: this.rlmTools,
+        contextPlanning: this.contextPlanning,
       };
 
       if (!this.createSubAgent) {

@@ -14,6 +14,7 @@ import type {
   PrepareSubAgentResult,
   RLMSubAgentSettings,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
@@ -164,6 +165,7 @@ class CloudflareREPLEnvironment implements RLMSandbox {
   private createSubAgent?: RLMSandboxFactoryOptions["createSubAgent"];
   private successfulSnippets: string[] = [];
   private rlmTools?: RLMToolSet;
+  private contextPlanning?: RLMContextPlanningSettings;
 
   constructor(options: CloudflareREPLEnvironmentOptions) {
     const {
@@ -182,6 +184,7 @@ class CloudflareREPLEnvironment implements RLMSandbox {
       logLevel,
       sandboxFactory = createCloudflareSandbox as RLMSandboxFactory,
       rlmTools,
+      contextPlanning,
     } = options;
     assertValidToolNames(rlmTools);
     this.executor = executor;
@@ -202,6 +205,7 @@ class CloudflareREPLEnvironment implements RLMSandbox {
     this.sandboxFactory = sandboxFactory;
     this.createSubAgent = options.createSubAgent;
     this.rlmTools = rlmTools;
+    this.contextPlanning = contextPlanning;
   }
 
   async loadContext(context: RLMContext): Promise<void> {
@@ -303,6 +307,7 @@ class CloudflareREPLEnvironment implements RLMSandbox {
         logger: this.logger,
         logLevel: this.logLevel,
         rlmTools: this.rlmTools,
+        contextPlanning: this.contextPlanning,
       };
 
       if (!this.createSubAgent) {

@@ -9,6 +9,7 @@ import type {
   RLMSubAgentRunner,
   RLMSubAgentSettings,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
@@ -49,6 +50,7 @@ export interface RLMSandboxFactoryOptions {
   logLevel?: RLMLogLevel;
   sandboxFactory?: RLMSandboxFactory;
   rlmTools?: RLMToolSet;
+  contextPlanning?: RLMContextPlanningSettings;
 }
 
 export type RLMSandboxFactory = (options: RLMSandboxFactoryOptions) => RLMSandbox;
