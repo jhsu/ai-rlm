@@ -19,6 +19,14 @@ bun run examples/tool-usage.ts
 bun run examples/stream-usage.ts
 ```
 
+### Cloudflare sandbox example
+`cloudflare-sandbox.ts` is a Cloudflare Worker example and requires a Worker Loader binding, so run it from a Worker project with Wrangler rather than directly with Bun.
+
+```bash
+npm install ai ai-rlm @ai-sdk/openai @cloudflare/codemode zod
+wrangler dev examples/cloudflare-sandbox.ts
+```
+
 ### Run individual examples
 ```bash
 # Agent Examples
@@ -37,6 +45,7 @@ bun run -e "import { example2ToolWithAgent } from './examples/tool-usage.ts'; ex
 bun run examples/document-comparison.ts
 bun run examples/data-transformation.ts
 bun run examples/stream-usage.ts
+bun run examples/book-rec-with-exa.ts
 ```
 
 ## Examples Overview
@@ -155,6 +164,21 @@ Consumes both `fullStream` and `textStream` from `RLMAgent.stream()`.
 - `start-step` / `finish-step` progress markers
 - `textStream` consumption for final text
 - Accessing the final structured result via `streamResult.output`
+
+### Cloudflare Sandbox (`cloudflare-sandbox.ts`)
+
+Runs `RLMAgent` with `createCloudflareSandbox()` and `@cloudflare/codemode`'s `DynamicWorkerExecutor` inside a Cloudflare Worker.
+
+**Key concepts**:
+- Supplying a custom `sandboxFactory`
+- Using a Cloudflare `worker_loaders` binding
+- Keeping sandbox network access blocked with `globalOutbound: null`
+
+### Book Recommendations With Exa (`book-rec-with-exa.ts`)
+
+Replicates the Fast RLM Exa book recommendation example in TypeScript by exposing Exa and Goodreads as `rlmTools`, letting generated RLM code call them from the sandbox, and returning 10 ranked picks.
+
+Requires `EXA_API_KEY` and `OPENAI_API_KEY`.
 
 ## Example Output
 

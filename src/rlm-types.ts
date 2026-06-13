@@ -13,6 +13,14 @@ export interface RLMUsageSummary {
 
 export type RLMContext = string | string[] | Record<string, unknown>;
 
+export interface RLMToolDescriptor {
+  description: string;
+  inputSchema?: unknown;
+  execute: (input: unknown) => MaybePromise<unknown>;
+}
+
+export type RLMToolSet = Record<string, RLMToolDescriptor>;
+
 export interface PrepareIterationContext {
   iteration: number;
   maxIterations: number;
@@ -59,6 +67,7 @@ export interface RLMSubAgentSettings {
   ) => MaybePromise<PrepareSubAgentResult | void>;
   logger?: RLMLogger;
   logLevel?: RLMLogLevel;
+  rlmTools?: RLMToolSet;
 }
 
 export interface PrepareSubAgentResult {

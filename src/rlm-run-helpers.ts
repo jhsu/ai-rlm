@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 import type { RLMSandboxExecutionResult } from "./sandbox.js";
-import type { RLMContext } from "./rlm-types.js";
+import type { RLMContext, RLMToolSet } from "./rlm-types.js";
 
 export function buildContextMetadata(context: RLMContext): string {
   if (typeof context === "string") {
@@ -28,10 +28,27 @@ export function buildContextMetadata(context: RLMContext): string {
 export function createInitialMessages(
   systemPrompt: string,
   contextMeta: string,
-  query: string
+  query: string,
+  rlmTools?: RLMToolSet
 ): ModelMessage[] {
+  const toolEntries = Object.entries(rlmTools ?? {});
+  const toolsText =
+    toolEntries.length === 0
+      ? "No custom tools are available."
+      : toolEntries
+          .map(([name, tool]) => {
+            const schema = tool.inputSchema
+              ? `\n  inputSchema: ${JSON.stringify(tool.inputSchema)}`
+              : "";
+            return `- tools.${name}(input): ${tool.description}${schema}`;
+          })
+          .join("\n");
+
   return [
-    { role: "system", content: systemPrompt },
+    {
+      role: "system",
+      content: `${systemPrompt}\n\nCustom tools available in the REPL:\n${toolsText}\n\nCustom tools are asynchronous. Use await, for example: const results = await tools.search({ query: "..." });`,
+    },
     {
       role: "user",
       content: `\

@@ -1,0 +1,11 @@
+packages:
+  - .
+  - apps/*
+  - site
+
+allowBuilds:
+  '@mongodb-js/zstd': true
+  esbuild: true
+  node-liblzma: true
+  sharp: true
+  workerd: true

@@ -25,6 +25,7 @@ import type {
   LanguageModelUsage,
 } from "ai";
 import { createQuickJSSandbox } from "./quickjs-sandbox.js";
+export { createCloudflareSandbox } from "./cloudflare-sandbox.js";
 import { createLogger, resolveLogLevel } from "./logger.js";
 import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import {
@@ -50,6 +51,7 @@ import type {
   PrepareSubAgentResult,
   RLMContext,
   RLMSubAgentSettings,
+  RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
 import {
@@ -77,6 +79,8 @@ export type {
   PrepareSubAgentResult,
   RLMContext,
   RLMSubAgentSettings,
+  RLMToolDescriptor,
+  RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
 
@@ -112,6 +116,8 @@ export interface RLMAgentSettings {
   logLevel?: RLMLogLevel;
   /** Optional sandbox factory for custom code execution environments */
   sandboxFactory?: RLMSandboxFactory;
+  /** Optional async tools exposed to generated REPL code as tools.<name>(input) */
+  rlmTools?: RLMToolSet;
 }
 
 /**
@@ -254,6 +260,7 @@ interface RLMAgentResolvedSettings {
   logger?: RLMLogger;
   logLevel: RLMLogLevel;
   sandboxFactory: RLMSandboxFactory;
+  rlmTools?: RLMToolSet;
 }
 
 export class RLMAgent<TOOLS extends ToolSet = ToolSet>
@@ -279,6 +286,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       logger: settings.logger,
       logLevel: resolveLogLevel({ logLevel: settings.logLevel }),
       sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
+      rlmTools: settings.rlmTools,
     };
     this.id = "rlm-agent";
     this.tools = {} as TOOLS;
@@ -382,10 +390,12 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
         new RLMAgent({
           ...settings,
           sandboxFactory: this.settings.sandboxFactory,
+          rlmTools: settings.rlmTools ?? this.settings.rlmTools,
         }),
       logger: logger ?? this.settings.logger,
       logLevel: logLevel ?? this.settings.logLevel,
       sandboxFactory: this.settings.sandboxFactory,
+      rlmTools: this.settings.rlmTools,
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
@@ -425,7 +435,8 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       const messages: ModelMessage[] = createInitialMessages(
         RLM_SYSTEM_PROMPT,
         contextMeta,
-        query
+        query,
+        this.settings.rlmTools
       );
 
       for (

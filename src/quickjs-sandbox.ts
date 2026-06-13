@@ -20,6 +20,7 @@ import type {
   PrepareSubAgentResult,
   RLMSubAgentSettings,
   RLMContext,
+  RLMToolSet,
   RLMUsageSummary,
 } from "./rlm-types.js";
 import type {
@@ -71,6 +72,16 @@ function formatThrownValue(value: unknown): string {
   return String(value);
 }
 
+function assertValidToolNames(rlmTools: RLMToolSet | undefined): void {
+  for (const name of Object.keys(rlmTools ?? {})) {
+    if (!/^[A-Za-z_$][\w$]*$/.test(name)) {
+      throw new Error(
+        `Invalid RLM tool name "${name}". Tool names must be valid JavaScript identifiers.`
+      );
+    }
+  }
+}
+
 class REPLEnvironment implements RLMSandbox {
   private ctx: QuickJSAsyncContext | undefined;
   private runtime: QuickJSAsyncRuntime | undefined;
@@ -96,6 +107,7 @@ class REPLEnvironment implements RLMSandbox {
   private logLevel?: RLMLogLevel;
   private sandboxFactory: RLMSandboxFactory;
   private createSubAgent?: RLMSandboxFactoryOptions["createSubAgent"];
+  private rlmTools?: RLMToolSet;
 
   constructor(options: REPLEnvironmentOptions) {
     const {
@@ -112,7 +124,9 @@ class REPLEnvironment implements RLMSandbox {
       logger,
       logLevel,
       sandboxFactory = createQuickJSSandbox,
+      rlmTools,
     } = options;
+    assertValidToolNames(rlmTools);
     this.llmCallCount = 0;
     this.maxLLMCalls = maxLLMCalls;
     this.model = model;
@@ -129,6 +143,7 @@ class REPLEnvironment implements RLMSandbox {
     this.logLevel = logLevel;
     this.sandboxFactory = sandboxFactory;
     this.createSubAgent = options.createSubAgent;
+    this.rlmTools = rlmTools;
   }
 
   async loadContext(context: RLMContext): Promise<void> {
@@ -246,6 +261,20 @@ class REPLEnvironment implements RLMSandbox {
     );
     this.ctx.setProp(this.ctx.global, "sub_rlm", subRlmFn);
     subRlmFn.dispose();
+
+    const toolsObj = this.ctx.newObject();
+    for (const [name, tool] of Object.entries(this.rlmTools ?? {})) {
+      const toolFn = this.ctx.newAsyncifiedFunction(name, async (inputHandle) => {
+        const input = this.ctx!.dump(inputHandle);
+        const result = await tool.execute(input);
+        const resultHandle = this.ctx!.evalCode(`(${JSON.stringify(result)})`);
+        return this.ctx!.unwrapResult(resultHandle);
+      });
+      this.ctx.setProp(toolsObj, name, toolFn);
+      toolFn.dispose();
+    }
+    this.ctx.setProp(this.ctx.global, "tools", toolsObj);
+    toolsObj.dispose();
 
     const finalFn = this.ctx.newFunction("FINAL", (answerHandle) => {
       const answer = this.ctx!.dump(answerHandle);
@@ -369,6 +398,7 @@ class REPLEnvironment implements RLMSandbox {
         prepareSubAgent: this.prepareSubAgent,
         logger: this.logger,
         logLevel: this.logLevel,
+        rlmTools: this.rlmTools,
       };
 
       if (!this.createSubAgent) {

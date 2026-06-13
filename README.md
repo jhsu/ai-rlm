@@ -252,6 +252,39 @@ interface RLMSandbox {
 
 Custom sandbox factories are also propagated to recursive `sub_rlm()` calls.
 
+### Custom REPL Tools
+
+Expose host-side async functions to generated RLM code with `rlmTools`. Tools are available in the sandbox as `tools.<name>(input)` and must be awaited.
+
+```typescript
+const agent = new RLMAgent({
+  model: openai('gpt-4.1'),
+  subModel: openai('gpt-4.1-mini'),
+  rlmTools: {
+    exa_search: {
+      description: 'Search Exa for pages matching a query',
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+      execute: async (input) => {
+        const { query } = input as { query: string };
+        return searchExa(query);
+      },
+    },
+  },
+});
+```
+
+Generated JavaScript can call:
+
+```javascript
+const results = await tools.exa_search({ query: '2026 literary fiction' });
+```
+
+Tool names must be valid JavaScript identifiers.
+
 ## API Reference
 
 ### RLMAgent

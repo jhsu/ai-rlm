@@ -6,7 +6,11 @@
  */
 
 // Main exports
-export { RLMAgent, createQuickJSSandbox } from "./rlm.js";
+export {
+  RLMAgent,
+  createQuickJSSandbox,
+  createCloudflareSandbox,
+} from "./rlm.js";
 export type {
   RLMAgentSettings,
   RLMAgentCallParameters,
@@ -25,7 +29,13 @@ export type {
   RLMSandboxExecutionResult,
   RLMSandboxFactory,
   RLMSandboxFactoryOptions,
+  RLMToolDescriptor,
+  RLMToolSet,
 } from "./rlm.js";
+export type {
+  CloudflareSandboxExecutor,
+  CloudflareSandboxFactoryOptions,
+} from "./cloudflare-sandbox.js";
 
 // Tool exports
 export { createRLMTool } from "./rlm-tool.js";

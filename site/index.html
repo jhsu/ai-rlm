@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="AI-RLM is a TypeScript library for recursive AI workflows that decompose complex tasks, run focused steps, and synthesize better answers."
+    />
+    <title>AI-RLM</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="AI-RLM home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" role="img">
+            <path d="M16 2 28 9v14l-12 7-12-7V9L16 2Z" />
+            <path d="M10 12h7a5 5 0 0 1 0 10h-7V12Zm7 0 5 10" />
+          </svg>
+        </span>
+        <span>AI-RLM</span>
+      </a>
+      <nav class="nav" aria-label="Primary navigation">
+        <a href="#overview">Overview</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#use-cases">Use cases</a>
+        <a href="#confidence">For teams</a>
+      </nav>
+      <button class="theme-toggle" type="button" aria-label="Toggle color mode" aria-pressed="true">
+        <span aria-hidden="true">Dark</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="hero" id="overview">
+        <div class="hero-copy">
+          <div class="eyebrow">Recursive AI workflows for TypeScript teams</div>
+          <h1>Help models break down hard work before they answer.</h1>
+          <p class="typed-line" aria-label="TypeScript-first recursive workflow execution">
+            <span>TypeScript-first recursive workflow execution</span>
+          </p>
+          <p>
+            AI-RLM gives AI engineers a practical way to decompose complex tasks,
+            run focused model or code-backed steps, and synthesize the intermediate
+            work into stronger final outputs.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="https://github.com/jhsu/ai-rlm">
+              <span class="github-icon" aria-hidden="true"></span>
+              View on GitHub
+            </a>
+            <a class="button secondary" href="#workflow">
+              <span class="github-icon" aria-hidden="true"></span>
+              See the workflow
+            </a>
+          </div>
+        </div>
+        <div class="hero-visual terminal-visual" aria-hidden="true">
+          <div class="terminal-chrome">
+            <span></span>
+            <span></span>
+            <span></span>
+            <strong>ai-rlm/run.ts</strong>
+          </div>
+          <pre class="terminal-code"><code><span class="code-keyword">const</span> result = <span class="code-keyword">await</span> rlm({
+  model,
+  prompt: <span class="code-string">"compare docs + explain risks"</span>,
+  tools: { searchDocs, runAnalysis },
+});</code></pre>
+          <div class="terminal-log">
+            <p><span class="prompt">rlm</span> plan root task<span class="cursor"></span></p>
+            <p><span class="ok">ok</span> split into 4 focused jobs</p>
+            <p><span class="ok">ok</span> execute searchDocs -> evidence</p>
+            <p><span class="ok">ok</span> runAnalysis -> deltas</p>
+            <p><span class="prompt">rlm</span> synthesize final answer</p>
+          </div>
+          <div class="mini-dag">
+            <svg viewBox="0 0 520 150">
+              <g class="dag-edges">
+                <path d="M99 75H156M224 75L281 38M224 75L281 112M349 38L421 75M349 112L421 75" />
+              </g>
+              <g class="dag-node dag-root">
+                <rect x="31" y="58" width="68" height="34" rx="7" />
+                <text x="65" y="80">task</text>
+              </g>
+              <g class="dag-node dag-plan">
+                <rect x="156" y="58" width="68" height="34" rx="7" />
+                <text x="190" y="80">plan</text>
+              </g>
+              <g class="dag-node dag-a">
+                <rect x="281" y="21" width="68" height="34" rx="7" />
+                <text x="315" y="43">docs</text>
+              </g>
+              <g class="dag-node dag-b">
+                <rect x="281" y="95" width="68" height="34" rx="7" />
+                <text x="315" y="117">risk</text>
+              </g>
+              <g class="dag-node dag-c">
+                <rect x="421" y="58" width="68" height="34" rx="7" />
+                <text x="455" y="80">answer</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="section split" id="workflow">
+        <div class="section-heading">
+          <p class="eyebrow">How it works</p>
+          <h2>Turn one oversized prompt into inspectable steps.</h2>
+          <p>
+            Instead of asking a model to solve everything in one pass, AI-RLM lets
+            your workflow plan smaller calls, execute them, and preserve the trail
+            of intermediate reasoning your team needs to debug and improve it.
+          </p>
+        </div>
+        <pre class="code-card"><code>const result = await rlm({
+  model,
+  prompt: "Compare these documents and explain the risks",
+  tools: {
+    searchDocs,
+    runAnalysis,
+  },
+});
+
+console.log(result.answer);
+console.log(result.steps);</code></pre>
+      </section>
+
+      <section class="section">
+        <div class="section-heading">
+          <p class="eyebrow">Built for AI engineers</p>
+          <h2>Control the workflow without hiding the internals.</h2>
+        </div>
+        <div class="cards stagger-group">
+          <article class="card reveal">
+            <span>01</span>
+            <h3>Decompose complex tasks</h3>
+            <p>Split long-context work into smaller model-readable jobs that are easier to reason about.</p>
+          </article>
+          <article class="card reveal">
+            <span>02</span>
+            <h3>Inspect each step</h3>
+            <p>Keep intermediate work visible so engineers can evaluate behavior, debug failures, and improve prompts.</p>
+          </article>
+          <article class="card reveal">
+            <span>03</span>
+            <h3>Use your stack</h3>
+            <p>Bring your models, tools, and TypeScript workflows instead of adopting a closed agent platform.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="use-cases">
+        <div class="section-heading">
+          <p class="eyebrow">Use cases</p>
+          <h2>Start with the AI jobs that break single-shot prompting.</h2>
+        </div>
+        <div class="use-case-list stagger-group">
+          <article class="use-case-card reveal">
+            <h3>Long-document reasoning</h3>
+            <p>Analyze larger inputs by routing focused sub-questions through the context that matters.</p>
+          </article>
+          <article class="use-case-card reveal">
+            <h3>Document comparison</h3>
+            <p>Compare versions, contracts, specs, or policies and synthesize the meaningful differences.</p>
+          </article>
+          <article class="use-case-card reveal">
+            <h3>Research and synthesis</h3>
+            <p>Break broad research tasks into smaller investigations, then combine the findings.</p>
+          </article>
+          <article class="use-case-card reveal">
+            <h3>Data transformation</h3>
+            <p>Use model-guided steps and code execution for extraction, cleanup, and structured outputs.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section confidence" id="confidence">
+        <div>
+          <p class="eyebrow">For technical leaders</p>
+          <h2>Give your team a reusable pattern for serious AI workflows.</h2>
+        </div>
+        <p>
+          AI-RLM is not a black-box agent platform. It is a developer-controlled
+          library for teams that need recursive reasoning, inspectable execution,
+          and room to adapt as models, tools, and product requirements change.
+        </p>
+        <div class="proof-points" aria-label="Leadership proof points">
+          <span>Model-flexible</span>
+          <span>Inspectable steps</span>
+          <span>TypeScript-native</span>
+          <span>Pilot-friendly</span>
+        </div>
+      </section>
+
+      <section class="section cta">
+        <p class="eyebrow">Get started</p>
+        <h2>Explore the repo and run an example.</h2>
+        <p>
+          Start with the open-source package, inspect the examples, and decide
+          where recursive AI workflows fit in your product.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/jhsu/ai-rlm">
+            <span class="github-icon" aria-hidden="true"></span>
+            View on GitHub
+          </a>
+          <a class="button secondary" href="https://github.com/jhsu/ai-rlm/tree/main/examples">
+            <span class="github-icon" aria-hidden="true"></span>
+            Browse examples
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>AI-RLM</span>
+      <a href="https://github.com/jhsu/ai-rlm">GitHub</a>
+    </footer>
+    <script src="./script.js"></script>
+  </body>
+</html>
