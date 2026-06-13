@@ -13,6 +13,23 @@ export interface RLMUsageSummary {
 
 export type RLMContext = string | string[] | Record<string, unknown>;
 
+export interface RLMContextPlanningSettings {
+  /** Maximum prompt characters to send directly to llm_query before chunking or delegation is preferred. */
+  maxDirectLLMQueryChars?: number;
+  /** Prompt/context size where sub_rlm should be preferred for complex subtasks when recursion is available. */
+  preferSubRLMChars?: number;
+  /** Recommended chunk size when generated code needs to split large text. */
+  chunkSizeChars?: number;
+  /** Recommended overlap between adjacent chunks when splitting large text. */
+  chunkOverlapChars?: number;
+  /** Maximum nested object/array depth included in first-iteration context metadata. */
+  metadataMaxDepth?: number;
+  /** Maximum number of nested metadata entries included in the prompt. */
+  metadataMaxEntries?: number;
+  /** Maximum preview characters shown per string field in metadata. */
+  metadataMaxPreviewChars?: number;
+}
+
 export interface RLMToolDescriptor {
   description: string;
   inputSchema?: unknown;
@@ -68,6 +85,7 @@ export interface RLMSubAgentSettings {
   logger?: RLMLogger;
   logLevel?: RLMLogLevel;
   rlmTools?: RLMToolSet;
+  contextPlanning?: RLMContextPlanningSettings;
 }
 
 export interface PrepareSubAgentResult {

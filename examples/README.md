@@ -45,6 +45,8 @@ bun run -e "import { example2ToolWithAgent } from './examples/tool-usage.ts'; ex
 
 # Other Examples
 bun run examples/document-comparison.ts
+bun run examples/multi-document-summary.ts
+bun run examples/multi-document-summary-tool-call.ts
 bun run examples/data-transformation.ts
 bun run examples/stream-usage.ts
 bun run examples/book-rec-with-exa.ts
@@ -146,6 +148,28 @@ Compares two versions of a policy document and identifies changes.
 - Document diffing
 - Change detection (additions/deletions)
 - Structured comparison output
+
+### Multi-Document Summary (`multi-document-summary.ts`)
+
+Summarizes several related documents separately, then provides a final synthesis across all documents.
+
+**Key concepts**:
+- Passing multiple documents as structured context
+- Per-document summarization
+- Cross-document synthesis with a final summary
+
+### Multi-Document Summary Tool Call (`multi-document-summary-tool-call.ts`)
+
+Uses an RLM-backed tool inside an AI SDK `generateText()` call. The outer model passes a document query and task instructions; the tool retrieves matching documents from its own corpus, runs `RLMAgent`, then returns the result for the outer model to synthesize.
+
+**Key concepts**:
+- RLM agent inside an AI SDK tool
+- Tool-owned document retrieval
+- Recursive RLM depth with `maxDepth`
+- Per-document decomposition with `llm_query_batched()` or `sub_rlm()`
+- Forced first-step tool call with `toolChoice`
+- Multi-step `generateText()` with `stepCountIs(2)`
+- Final synthesis from a tool result
 
 ### Data Transformation (`data-transformation.ts`)
 

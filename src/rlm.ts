@@ -40,6 +40,7 @@ import {
   buildOutputMetadata,
   createInitialMessages,
   extractReasoning,
+  resolveContextPlanningSettings,
   truncateOutput,
 } from "./rlm-run-helpers.js";
 import type { RLMSandboxFactory } from "./sandbox.js";
@@ -50,6 +51,7 @@ import type {
   PrepareSubAgentContext,
   PrepareSubAgentResult,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMSubAgentSettings,
   RLMToolSet,
   RLMUsageSummary,
@@ -78,6 +80,7 @@ export type {
   PrepareSubAgentContext,
   PrepareSubAgentResult,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMSubAgentSettings,
   RLMToolDescriptor,
   RLMToolSet,
@@ -118,6 +121,8 @@ export interface RLMAgentSettings {
   sandboxFactory?: RLMSandboxFactory;
   /** Optional async tools exposed to generated REPL code as tools.<name>(input) */
   rlmTools?: RLMToolSet;
+  /** Optional planning thresholds used in first-iteration context metadata and guidance */
+  contextPlanning?: RLMContextPlanningSettings;
 }
 
 /**
@@ -261,6 +266,7 @@ interface RLMAgentResolvedSettings {
   logLevel: RLMLogLevel;
   sandboxFactory: RLMSandboxFactory;
   rlmTools?: RLMToolSet;
+  contextPlanning: Required<RLMContextPlanningSettings>;
 }
 
 export class RLMAgent<TOOLS extends ToolSet = ToolSet>
@@ -287,6 +293,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       logLevel: resolveLogLevel({ logLevel: settings.logLevel }),
       sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
       rlmTools: settings.rlmTools,
+      contextPlanning: resolveContextPlanningSettings(settings.contextPlanning),
     };
     this.id = "rlm-agent";
     this.tools = {} as TOOLS;
@@ -391,11 +398,14 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
           ...settings,
           sandboxFactory: this.settings.sandboxFactory,
           rlmTools: settings.rlmTools ?? this.settings.rlmTools,
+          contextPlanning:
+            settings.contextPlanning ?? this.settings.contextPlanning,
         }),
       logger: logger ?? this.settings.logger,
       logLevel: logLevel ?? this.settings.logLevel,
       sandboxFactory: this.settings.sandboxFactory,
       rlmTools: this.settings.rlmTools,
+      contextPlanning: this.settings.contextPlanning,
     });
     const steps: REPLStep[] = [];
     let mainLLMCallCount = 0; // Track main agent LLM calls
@@ -431,12 +441,20 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
     try {
       await repl.loadContext(context);
 
-      const contextMeta = buildContextMetadata(context);
+      const contextMeta = buildContextMetadata(
+        context,
+        this.settings.contextPlanning
+      );
       const messages: ModelMessage[] = createInitialMessages(
         RLM_SYSTEM_PROMPT,
         contextMeta,
         query,
-        this.settings.rlmTools
+        this.settings.rlmTools,
+        this.settings.contextPlanning,
+        {
+          currentDepth: currentDepth ?? 0,
+          maxDepth: this.settings.maxDepth,
+        }
       );
 
       for (

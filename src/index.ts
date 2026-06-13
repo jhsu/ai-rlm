@@ -20,6 +20,7 @@ export type {
   RLMGenerateResult,
   RLMStreamResult,
   RLMContext,
+  RLMContextPlanningSettings,
   RLMUsageSummary,
   PrepareIterationContext,
   PrepareIterationResult,
