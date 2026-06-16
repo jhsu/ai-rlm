@@ -1,5 +1,11 @@
 # ai-rlm
 
+## 2.4.0
+
+### Minor Changes
+
+- bebcdfb: Add structured output validation for RLM final answers via `outputSchema`.
+
 ## 2.3.0
 
 ### Minor Changes
