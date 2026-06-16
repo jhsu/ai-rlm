@@ -21,6 +21,11 @@ bun run examples/tool-usage.ts
 bun run examples/stream-usage.ts
 ```
 
+### Run structured output example
+```bash
+bun run examples/structured-output.ts
+```
+
 ### Cloudflare sandbox example
 `cloudflare-sandbox.ts` is a Cloudflare Worker example and requires a Worker Loader binding, so run it from a Worker project with Wrangler rather than directly with Bun.
 
@@ -48,6 +53,7 @@ bun run examples/document-comparison.ts
 bun run examples/multi-document-summary.ts
 bun run examples/multi-document-summary-tool-call.ts
 bun run examples/data-transformation.ts
+bun run examples/structured-output.ts
 bun run examples/stream-usage.ts
 bun run examples/book-rec-with-exa.ts
 ```
@@ -180,6 +186,15 @@ Transforms unstructured data (messy logs, notes) into structured formats.
 - Data normalization
 - JSON/CSV transformation
 - Meeting minutes extraction
+
+### Structured Output (`structured-output.ts`)
+
+Extracts customer feedback into a Zod-validated object using `outputSchema`.
+
+**Key concepts**:
+- Passing `outputSchema` to `agent.generate()`
+- Retrying invalid `FINAL` values within the iteration loop
+- Reading `result.output.structuredOutput`
 
 ### Streaming (`stream-usage.ts`)
 
