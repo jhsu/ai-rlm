@@ -136,6 +136,7 @@ Provide the context (string, array of strings, or JSON object) and your query/qu
         logger: config.logger,
         logLevel: config.logLevel,
         sandboxFactory: config.sandboxFactory,
+        outputSchema: config.outputSchema,
       });
 
       const result = await agent.generate({

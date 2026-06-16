@@ -13,6 +13,8 @@ export interface RLMUsageSummary {
 
 export type RLMContext = string | string[] | Record<string, unknown>;
 
+export type RLMOutputSchema = unknown;
+
 export interface RLMContextPlanningSettings {
   /** Maximum prompt characters to send directly to llm_query before chunking or delegation is preferred. */
   maxDirectLLMQueryChars?: number;

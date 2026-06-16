@@ -5,16 +5,24 @@ function stringifyFinalValue(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
+export interface RLMFinalValue {
+  value: unknown;
+  text: string;
+}
+
 async function resolveFinalDescriptor(
   finalAnswer: { type: "direct" | "variable"; content: unknown } | null,
   repl: Pick<RLMSandbox, "getVariable">
-): Promise<string | undefined> {
+): Promise<RLMFinalValue | undefined> {
   if (!finalAnswer) {
     return undefined;
   }
 
   if (finalAnswer.type === "direct") {
-    return stringifyFinalValue(finalAnswer.content);
+    return {
+      value: finalAnswer.content,
+      text: stringifyFinalValue(finalAnswer.content),
+    };
   }
 
   if (typeof finalAnswer.content !== "string" || !finalAnswer.content) {
@@ -26,20 +34,30 @@ async function resolveFinalDescriptor(
     return undefined;
   }
 
-  return stringifyFinalValue(variableValue);
+  return {
+    value: variableValue,
+    text: stringifyFinalValue(variableValue),
+  };
+}
+
+export async function resolveFinalValue(
+  response: string,
+  repl: Pick<RLMSandbox, "getVariable">
+): Promise<RLMFinalValue | undefined> {
+  return resolveFinalDescriptor(extractFinalAnswer(response), repl);
 }
 
 export async function resolveFinalAnswer(
   response: string,
   repl: Pick<RLMSandbox, "getVariable">
 ): Promise<string | undefined> {
-  return resolveFinalDescriptor(extractFinalAnswer(response), repl);
+  return (await resolveFinalValue(response, repl))?.text;
 }
 
-export async function resolveExecutionFinalAnswer(
+export async function resolveExecutionFinalValue(
   result: unknown,
   repl: Pick<RLMSandbox, "getVariable">
-): Promise<string | undefined> {
+): Promise<RLMFinalValue | undefined> {
   if (!result || typeof result !== "object") {
     return undefined;
   }
@@ -59,6 +77,13 @@ export async function resolveExecutionFinalAnswer(
   }
 
   return undefined;
+}
+
+export async function resolveExecutionFinalAnswer(
+  result: unknown,
+  repl: Pick<RLMSandbox, "getVariable">
+): Promise<string | undefined> {
+  return (await resolveExecutionFinalValue(result, repl))?.text;
 }
 
 export function extractRequestedFinalVariable(

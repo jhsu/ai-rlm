@@ -30,9 +30,13 @@ import { createLogger, resolveLogLevel } from "./logger.js";
 import type { RLMLogLevel, RLMLogger } from "./logger.js";
 import {
   extractRequestedFinalVariable,
-  resolveExecutionFinalAnswer,
-  resolveFinalAnswer,
+  resolveExecutionFinalValue,
+  resolveFinalValue,
 } from "./rlm-final-answer.js";
+import {
+  parseFinalTextForSchema,
+  validateOutputSchema,
+} from "./rlm-output-schema.js";
 import { normalizeGenerateInput } from "./rlm-input.js";
 import {
   buildContextMetadata,
@@ -52,6 +56,7 @@ import type {
   PrepareSubAgentResult,
   RLMContext,
   RLMContextPlanningSettings,
+  RLMOutputSchema,
   RLMSubAgentSettings,
   RLMToolSet,
   RLMUsageSummary,
@@ -81,6 +86,7 @@ export type {
   PrepareSubAgentResult,
   RLMContext,
   RLMContextPlanningSettings,
+  RLMOutputSchema,
   RLMSubAgentSettings,
   RLMToolDescriptor,
   RLMToolSet,
@@ -123,6 +129,8 @@ export interface RLMAgentSettings {
   rlmTools?: RLMToolSet;
   /** Optional planning thresholds used in first-iteration context metadata and guidance */
   contextPlanning?: RLMContextPlanningSettings;
+  /** Optional schema that FINAL / FINAL_VAR output must satisfy */
+  outputSchema?: RLMOutputSchema;
 }
 
 /**
@@ -137,6 +145,8 @@ export interface RLMAgentCallParameters {
   abortSignal?: AbortSignal;
   /** Optional timeout in milliseconds */
   timeout?: number;
+  /** Optional schema that FINAL / FINAL_VAR output must satisfy */
+  outputSchema?: RLMOutputSchema;
   /** Internal recursion depth for sub-agents */
   currentDepth?: number;
   /** Called when iteration starts (before LLM call) */
@@ -177,6 +187,9 @@ export interface RLMGenerateResult {
   iterations: number;
   /** Aggregated usage across root and sub-calls */
   usage: RLMUsageSummary;
+
+  /** Parsed/validated final value when outputSchema is provided */
+  structuredOutput?: unknown;
 
   response: GenerateTextResult<{}, any>;
 }
@@ -232,6 +245,8 @@ export interface RLMErrorEvent {
 type GenerateParams = {
   /** The large context to load into the REPL environment (not passed to the LLM) */
   context?: RLMContext;
+  /** Optional schema that FINAL / FINAL_VAR output must satisfy */
+  outputSchema?: RLMOutputSchema;
   /** Callback when an iteration starts (before LLM call) */
   onIterationStart?: (event: RLMIterationStartEvent) => void;
   /** Callback when an iteration completes (after code execution) */
@@ -267,6 +282,7 @@ interface RLMAgentResolvedSettings {
   sandboxFactory: RLMSandboxFactory;
   rlmTools?: RLMToolSet;
   contextPlanning: Required<RLMContextPlanningSettings>;
+  outputSchema?: RLMOutputSchema;
 }
 
 export class RLMAgent<TOOLS extends ToolSet = ToolSet>
@@ -294,6 +310,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       sandboxFactory: settings.sandboxFactory ?? createQuickJSSandbox,
       rlmTools: settings.rlmTools,
       contextPlanning: resolveContextPlanningSettings(settings.contextPlanning),
+      outputSchema: settings.outputSchema,
     };
     this.id = "rlm-agent";
     this.tools = {} as TOOLS;
@@ -317,6 +334,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       logLevel,
     } = options ?? {};
     const { context, query } = normalizeGenerateInput(params);
+    const outputSchema = options?.outputSchema ?? this.settings.outputSchema;
 
     const result = await this._generate({
       context,
@@ -329,6 +347,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       onError,
       logger,
       logLevel,
+      outputSchema,
     });
 
     const generateResult: GenerateTextResult<TOOLS, RLMAgentOutput> = {
@@ -376,6 +395,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
     onError,
     logger,
     logLevel,
+    outputSchema,
   }: RLMAgentCallParameters): Promise<RLMGenerateResult> {
     const startTime = Date.now();
     const internalLogger = createLogger({
@@ -400,6 +420,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
           rlmTools: settings.rlmTools ?? this.settings.rlmTools,
           contextPlanning:
             settings.contextPlanning ?? this.settings.contextPlanning,
+          outputSchema,
         }),
       logger: logger ?? this.settings.logger,
       logLevel: logLevel ?? this.settings.logLevel,
@@ -438,6 +459,25 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       }
     };
 
+    const validateFinal = (value: unknown, text: string) => {
+      const validation = validateOutputSchema(value, outputSchema);
+      if (validation.success) {
+        return {
+          ok: true as const,
+          text:
+            validation.value !== value && typeof validation.value === "object"
+              ? JSON.stringify(validation.value)
+              : text,
+          structuredOutput: validation.value,
+        };
+      }
+
+      return {
+        ok: false as const,
+        message: `The submitted FINAL value did not match the required output schema. Validation errors: ${validation.error}. Submit a corrected value using FINAL(value) or FINAL_VAR("variableName"). Do not change the schema or return explanatory text instead of the value.`,
+      };
+    };
+
     try {
       await repl.loadContext(context);
 
@@ -450,6 +490,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
         contextMeta,
         query,
         this.settings.rlmTools,
+        outputSchema,
         this.settings.contextPlanning,
         {
           currentDepth: currentDepth ?? 0,
@@ -634,17 +675,30 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
             }
           }
 
-          const executionFinalAnswer = await resolveExecutionFinalAnswer(
+          const executionFinalAnswer = await resolveExecutionFinalValue(
             executionResult.result,
             repl
           );
           if (executionFinalAnswer !== undefined) {
+            const validation = validateFinal(
+              executionFinalAnswer.value,
+              executionFinalAnswer.text
+            );
+            if (!validation.ok) {
+              messages.push(
+                { role: "assistant", content: response },
+                { role: "user", content: validation.message }
+              );
+              continue;
+            }
+
             return {
-              text: executionFinalAnswer,
+              text: validation.text,
               steps: steps,
               llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
               iterations: iteration + 1,
               usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              structuredOutput: validation.structuredOutput,
               response: result,
             };
           }
@@ -665,14 +719,24 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
             }
           );
 
-          const answer = await resolveFinalAnswer(response, repl);
+          const answer = await resolveFinalValue(response, repl);
           if (answer !== undefined) {
+            const validation = validateFinal(answer.value, answer.text);
+            if (!validation.ok) {
+              messages.push({
+                role: "user",
+                content: validation.message,
+              });
+              continue;
+            }
+
             return {
-              text: answer,
+              text: validation.text,
               steps: steps,
               llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
               iterations: iteration + 1,
               usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              structuredOutput: validation.structuredOutput,
               response: result,
             };
           }
@@ -684,8 +748,17 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
             });
           }
         } else {
-          const answer = await resolveFinalAnswer(response, repl);
+          const answer = await resolveFinalValue(response, repl);
           if (answer !== undefined) {
+            const validation = validateFinal(answer.value, answer.text);
+            if (!validation.ok) {
+              messages.push(
+                { role: "assistant", content: response },
+                { role: "user", content: validation.message }
+              );
+              continue;
+            }
+
             if (onIterationComplete) {
               try {
                 onIterationComplete({
@@ -696,7 +769,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
                     code: finalVariable
                       ? `FINAL_VAR(${finalVariable})`
                       : "FINAL(...)",
-                    output: `Final answer: ${answer}`,
+                    output: `Final answer: ${validation.text}`,
                   },
                   llmResponse: response,
                   executionTimeMs: Date.now() - iterationStartTime,
@@ -710,11 +783,12 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
             }
 
             return {
-              text: answer,
+              text: validation.text,
               steps: steps,
               llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
               iterations: iteration + 1,
               usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+              structuredOutput: validation.structuredOutput,
               response: result,
             };
           }
@@ -758,18 +832,31 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       addUsage(rootUsageSummary, usageFromGenerateResult(finalResult));
 
       const finalVariableName = extractRequestedFinalVariable(finalResult.text);
-      const answer =
-        (await resolveFinalAnswer(finalResult.text, repl)) ??
-        (finalVariableName
-          ? `[Variable ${finalVariableName} not found]`
-          : finalResult.text);
+      const finalValue = await resolveFinalValue(finalResult.text, repl);
+      const fallbackText = finalVariableName
+        ? `[Variable ${finalVariableName} not found]`
+        : finalResult.text;
+      const parsedFallbackValue = outputSchema
+        ? parseFinalTextForSchema(fallbackText)
+        : fallbackText;
+      const validation = validateFinal(
+        finalValue?.value ?? parsedFallbackValue,
+        finalValue?.text ?? fallbackText
+      );
+
+      if (!validation.ok) {
+        throw new Error(
+          `Maximum iterations reached and final output did not match the required output schema. ${validation.message}`
+        );
+      }
 
       return {
-        text: answer,
+        text: validation.text,
         steps: steps,
         llmCallCount: mainLLMCallCount + repl.getLLMCallCount(),
         iterations: this.settings.maxIterations,
         usage: mergeUsage(rootUsageSummary, repl.getUsageSummary()),
+        structuredOutput: validation.structuredOutput,
         response: finalResult,
       };
     } finally {
