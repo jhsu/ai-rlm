@@ -134,6 +134,28 @@ while (true) {
 }
 ```
 
+### Structured Output Validation
+
+Pass `outputSchema` to require the final `FINAL(...)` or `FINAL_VAR(...)` value to match a Zod schema or JSON Schema. If validation fails, the agent receives the validation errors and can retry within the remaining iteration budget.
+
+```typescript
+import { z } from 'zod';
+
+const result = await agent.generate({
+  prompt: 'Extract the verdict',
+  options: {
+    context: reviews,
+    outputSchema: z.object({
+      movie: z.string(),
+      averageScore: z.number(),
+      consensus: z.string(),
+    }),
+  },
+});
+
+console.log(result.output.structuredOutput);
+```
+
 ## How It Works
 
 The RLM agent writes JavaScript code to explore the context in an iterative loop:

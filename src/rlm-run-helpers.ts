@@ -3,8 +3,10 @@ import type { RLMSandboxExecutionResult } from "./sandbox.js";
 import type {
   RLMContext,
   RLMContextPlanningSettings,
+  RLMOutputSchema,
   RLMToolSet,
 } from "./rlm-types.js";
+import { describeOutputSchema } from "./rlm-output-schema.js";
 
 export type ResolvedRLMContextPlanningSettings = Required<RLMContextPlanningSettings>;
 
@@ -101,6 +103,7 @@ export function createInitialMessages(
   contextMeta: string,
   query: string,
   rlmTools?: RLMToolSet,
+  outputSchema?: RLMOutputSchema,
   planning: ResolvedRLMContextPlanningSettings = DEFAULT_CONTEXT_PLANNING,
   promptContext: RLMInitialPromptContext = {
     currentDepth: 0,
@@ -120,6 +123,9 @@ export function createInitialMessages(
           })
           .join("\n");
   const recursionAvailable = promptContext.currentDepth < promptContext.maxDepth - 1;
+  const outputSchemaText = outputSchema
+    ? `\n\nRequired output schema for FINAL / FINAL_VAR:\n${describeOutputSchema(outputSchema)}\n\nYour final value must validate against this schema. For object or array outputs, return the actual JavaScript object/array via FINAL(value) or FINAL_VAR("variableName"), not markdown or explanatory text.`
+    : "";
   const largeSubtaskGuidance = recursionAvailable
     ? `If an individual field or subtask is above ${planning.preferSubRLMChars} characters and needs multi-step semantic work, prefer sub_rlm(prompt, subContext) over a single llm_query.`
     : `Recursive sub_rlm is not available at this depth (current depth ${promptContext.currentDepth}, maxDepth ${promptContext.maxDepth}); for large semantic work, split into chunks and use llm_query_batched instead of passing one oversized prompt to llm_query.`;
@@ -127,7 +133,7 @@ export function createInitialMessages(
   return [
     {
       role: "system",
-      content: `${systemPrompt}\n\nCustom tools available in the REPL:\n${toolsText}\n\nCustom tools are asynchronous. Use await, for example: const results = await tools.search({ query: "..." });`,
+      content: `${systemPrompt}${outputSchemaText}\n\nCustom tools available in the REPL:\n${toolsText}\n\nCustom tools are asynchronous. Use await, for example: const results = await tools.search({ query: "..." });`,
     },
     {
       role: "user",
