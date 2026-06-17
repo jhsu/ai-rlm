@@ -17,6 +17,7 @@ import type {
   Output,
   AgentCallParameters,
   AgentStreamParameters,
+  FlexibleSchema,
   GenerateTextResult,
   TextStreamPart,
   StreamTextResult,
@@ -96,7 +97,7 @@ export type {
 /**
  * Settings for RLMAgent
  */
-export interface RLMAgentSettings {
+export interface RLMAgentSettings<CALL_OPTIONS extends object = {}> {
   /** Model for the root agent */
   model: LanguageModel;
   /** Model for sub-LLM queries (defaults to model) */
@@ -131,6 +132,8 @@ export interface RLMAgentSettings {
   contextPlanning?: RLMContextPlanningSettings;
   /** Optional schema that FINAL / FINAL_VAR output must satisfy */
   outputSchema?: RLMOutputSchema;
+  /** Optional AI SDK call options schema for validated per-call options */
+  callOptionsSchema?: FlexibleSchema<CALL_OPTIONS>;
 }
 
 /**
@@ -242,7 +245,7 @@ export interface RLMErrorEvent {
   context: string;
 }
 
-type GenerateParams = {
+type RLMBaseCallOptions = {
   /** The large context to load into the REPL environment (not passed to the LLM) */
   context?: RLMContext;
   /** Optional schema that FINAL / FINAL_VAR output must satisfy */
@@ -260,6 +263,9 @@ type GenerateParams = {
   /** Per-call log level override */
   logLevel?: RLMLogLevel;
 };
+
+type RLMAgentCallOptions<CALL_OPTIONS extends object> = RLMBaseCallOptions &
+  CALL_OPTIONS;
 
 interface RLMAgentOutput extends Output.Output<RLMGenerateResult, any, any> {}
 
@@ -283,10 +289,14 @@ interface RLMAgentResolvedSettings {
   rlmTools?: RLMToolSet;
   contextPlanning: Required<RLMContextPlanningSettings>;
   outputSchema?: RLMOutputSchema;
+  callOptionsSchema?: FlexibleSchema<unknown>;
 }
 
-export class RLMAgent<TOOLS extends ToolSet = ToolSet>
-  implements Agent<GenerateParams, TOOLS, RLMAgentOutput>
+export class RLMAgent<
+    TOOLS extends ToolSet = ToolSet,
+    CALL_OPTIONS extends object = {}
+  >
+  implements Agent<RLMAgentCallOptions<CALL_OPTIONS>, TOOLS, RLMAgentOutput>
 {
   readonly version = "agent-v1" as const;
   readonly id: string;
@@ -294,7 +304,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
 
   private settings: RLMAgentResolvedSettings;
 
-  constructor(settings: RLMAgentSettings) {
+  constructor(settings: RLMAgentSettings<CALL_OPTIONS>) {
     this.settings = {
       model: settings.model,
       subModel: settings.subModel ?? settings.model,
@@ -311,6 +321,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       rlmTools: settings.rlmTools,
       contextPlanning: resolveContextPlanningSettings(settings.contextPlanning),
       outputSchema: settings.outputSchema,
+      callOptionsSchema: settings.callOptionsSchema,
     };
     this.id = "rlm-agent";
     this.tools = {} as TOOLS;
@@ -322,7 +333,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
    * Implements the Agent interface with proper typing.
    */
   async generate(
-    params: AgentCallParameters<GenerateParams, TOOLS>
+    params: AgentCallParameters<RLMAgentCallOptions<CALL_OPTIONS>, TOOLS>
   ): Promise<GenerateTextResult<TOOLS, RLMAgentOutput>> {
     const { abortSignal, timeout, options } = params;
     const {
@@ -869,7 +880,7 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
    * Each step is yielded as it's completed.
    */
   async stream(
-    options: AgentStreamParameters<GenerateParams, TOOLS>
+    options: AgentStreamParameters<RLMAgentCallOptions<CALL_OPTIONS>, TOOLS>
   ): Promise<StreamTextResult<TOOLS, RLMAgentOutput>> {
     const streamState =
       createDeferred<GenerateTextResult<TOOLS, RLMAgentOutput>>();
@@ -880,7 +891,9 @@ export class RLMAgent<TOOLS extends ToolSet = ToolSet>
       start: (controller) => {
         controller.enqueue({ type: "start" });
 
-        const optionValues = options.options ?? {};
+        const optionValues = (options.options ?? {}) as Partial<
+          RLMAgentCallOptions<CALL_OPTIONS>
+        >;
 
         void this.generate({
           ...options,
